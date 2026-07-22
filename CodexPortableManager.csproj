@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A2A7AA00-75BA-4719-A663-7A89BD24EC3D}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>CodexPortableManager</RootNamespace>
+    <AssemblyName>CodexPortableManager</AssemblyName>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <TargetFrameworkProfile />
+    <FileAlignment>512</FileAlignment>
+    <LangVersion>latest</LangVersion>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <StartupObject>CodexPortableManager.Program</StartupObject>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <Prefer32Bit>false</Prefer32Bit>
+    <CpmDependencyRoot Condition=" '$(CpmDependencyRoot)' == '' ">$(MSBuildProjectDirectory)\.packages\compatibility-parser</CpmDependencyRoot>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="Esprima">
+      <HintPath>$(CpmDependencyRoot)\Esprima.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PresentationCore">
+      <HintPath>$(PresentationCorePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PresentationFramework">
+      <HintPath>$(PresentationFrameworkPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Memory">
+      <HintPath>$(CpmDependencyRoot)\System.Memory.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>$(CpmDependencyRoot)\System.Buffers.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>$(CpmDependencyRoot)\System.Numerics.Vectors.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>$(CpmDependencyRoot)\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Runtime.WindowsRuntime">
+      <HintPath>$(SystemRuntimeWindowsRuntimePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Runtime">
+      <HintPath>$(SystemRuntimeFacadePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml">
+      <HintPath>$(SystemXamlPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="WindowsBase">
+      <HintPath>$(WindowsBasePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Windows">
+      <HintPath>$(WindowsMetadataPath)</HintPath>
+      <IsWinMDFile>true</IsWinMDFile>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="src\App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Page Include="src\MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="src\DesignTokens.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="src\*.cs" Exclude="src\RenderTestRunner.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(CpmDependencyRoot)\Esprima.dll">
+      <LogicalName>CodexPortableManager.Dependencies.Esprima.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(CpmDependencyRoot)\System.Memory.dll">
+      <LogicalName>CodexPortableManager.Dependencies.System.Memory.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(CpmDependencyRoot)\System.Buffers.dll">
+      <LogicalName>CodexPortableManager.Dependencies.System.Buffers.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(CpmDependencyRoot)\System.Numerics.Vectors.dll">
+      <LogicalName>CodexPortableManager.Dependencies.System.Numerics.Vectors.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(CpmDependencyRoot)\System.Runtime.CompilerServices.Unsafe.dll">
+      <LogicalName>CodexPortableManager.Dependencies.System.Runtime.CompilerServices.Unsafe.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="THIRD_PARTY_NOTICES.md">
+      <LogicalName>CodexPortableManager.THIRD_PARTY_NOTICES.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Import Project="$(WpfTargetsPath)" Condition="Exists('$(WpfTargetsPath)')" />
+</Project>
