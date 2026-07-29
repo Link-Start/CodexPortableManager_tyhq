@@ -102,11 +102,11 @@ MainWindow
 
 ### DeploymentEngine
 
-`DeploymentEngine` 仍是部署状态机的唯一所有者，并以 `partial` 文件分别承载安装更新、回滚恢复、卸载恢复和路径/文件操作。它负责 install、update、rollback、uninstall 的操作锁、安装根校验、目录移动、安全删除、当前 journal、恢复、staging 兼容设置和 Shell 集成的事务编排，以及崩溃工作目录维护。回滚目标按“更低的 `.previous`、缓存中最高的同架构低版本、原双向 `.previous` 切换”排序；缓存目标允许显式降级，但仍复用完整包信任、staging、兼容事务和 update journal，绝不原位覆盖 current。删除原语按对象语义分层：空安装槽只在同一句柄确认无子项后直接删除；普通文件相对稳定父句柄 no-follow 打开，并在迁移或维护场景复验持久 File ID；受管目录树才允许递归，并继续要求允许父目录、最终目录 File ID 或 receipt。枚举属性只作为最小权限提示，普通文件不申请 `FILE_READ_DATA`，只有经句柄复验的普通目录才申请 `FILE_LIST_DIRECTORY`。枚举后类型、身份或只读状态发生变化时失败并由既有重试重新取得权限，不放宽竞态边界。部署 API 不接收窗口兼容快照；新安装使用全关闭选项，更新在持有安装锁后直接检查上一安装的 helper 与 `app.asar`，把可确认的实际状态交给官方 staging 变换。未知官方结构且不存在本工具受管标记时解析为关闭，不阻断更新；正常更新遇到受管标记混合或无法识别时停止，明确缓存回滚则以全关闭目标继续并保留原 current 为 `.previous`，不解释或迁移旧开发配方。增量获取、`ArtifactPipeline`、回滚和 Shell 集成不接收窗口兼容选项。目录内进程关闭由共享的 `ProcessesUnderPath` 实现，部署引擎只决定调用时机和超时策略。便携卸载在 current/previous 已原子移动到带 Armed receipt 的 tombstone、活动槽提交为空且 Shell 清理已发起后即可向 UI 返回；`UninstallCleanupWorker` 通过同一 EXE 的非 GUI 命令启动独立后台进程，重新取得安装根操作锁并调用同一恢复状态机完成物理删除。窗口退出不会终止该进程，异常退出则保留 journal 供后续启动继续恢复。它只单向调用具体协调器，不通过委托回调 Service。任何目录拓扑或提交阶段变化都必须继续由故障注入回归测试覆盖。
+`DeploymentEngine` 仍是部署状态机的唯一所有者，并以 `partial` 文件分别承载安装更新、回滚恢复、卸载恢复和路径/文件操作。它负责 install、update、rollback、uninstall 的操作锁、安装根校验、目录移动、安全删除、当前 journal、恢复、staging 兼容设置和 Shell 集成的事务编排，以及崩溃工作目录维护。回滚目标按“更低的 `.previous`、缓存中最高的同架构低版本、原双向 `.previous` 切换”排序；缓存目标允许显式降级，但仍复用完整包信任、staging、兼容事务和 update journal，绝不原位覆盖 current。删除原语按对象语义分层：空安装槽只在同一句柄确认无子项后直接删除；普通文件相对稳定父句柄 no-follow 打开，并在迁移或维护场景复验持久 File ID；受管目录树才允许递归，并继续要求允许父目录、最终目录 File ID 或 receipt。枚举属性只作为最小权限提示，普通文件不申请 `FILE_READ_DATA`，只有经句柄复验的普通目录才申请 `FILE_LIST_DIRECTORY`。枚举后类型、身份或只读状态发生变化时失败并由既有重试重新取得权限，不放宽竞态边界。部署 API 不接收窗口兼容快照；新安装使用全关闭选项，更新在持有安装锁后直接检查上一安装的 helper 与 `app.asar`，把可确认的实际状态交给官方 staging 变换。未知官方结构且不存在本工具受管标记时解析为关闭，不阻断更新；正常更新遇到受管标记混合或无法识别时停止，明确缓存回滚则以全关闭目标继续并保留原 current 为 `.previous`，不解释或迁移旧开发配方。增量获取、`ArtifactPipeline`、回滚和 Shell 集成不接收窗口兼容选项。目录内进程关闭由共享的 `ProcessesUnderPath` 实现，部署引擎只决定调用时机和超时策略。更新在新 current、`.previous` 和外部状态提交后即可向 UI 返回；`PostDeploymentCleanupWorker` 通过同一 EXE 的非 GUI 命令启动独立后台进程，重新取得安装根操作锁并回收已隔离的 `transaction-old`，随后执行缓存维护。便携卸载同样在 current/previous 已原子移动到带 Armed receipt 的 tombstone、活动槽提交为空且 Shell 清理已发起后返回，再由 `UninstallCleanupWorker` 完成物理删除。窗口退出不会终止两类进程，异常退出则保留 journal 供后续启动继续恢复。它只单向调用具体协调器，不通过委托回调 Service。任何目录拓扑或提交阶段变化都必须继续由故障注入回归测试覆盖。
 
 ### DeploymentJournal
 
-记录操作 ID、安装 ID、操作类型和阶段枚举，以及恢复所需的初始拓扑和选项快照。更新、回滚和卸载共享当前唯一结构，不读取旧 journal，也不根据目录拓扑补造事务授权。清理 receipt 使用 `Prepared -> Armed`：`Prepared` 同时绑定来源目录身份和安装 marker 文件的持久 File ID，已经验证所有权的来源句柄必须跨越 journal 落盘与目录移动；移动后再从同一句柄取得最终 tombstone 身份，并把 `Armed` 与对应 `Detached` 阶段作为同一个候选记录原子写入。Prepared 崩溃恢复必须同时复验来源目录和 marker；目录 ID 因文件系统语义变化时保持 pending，不猜测恢复。只有 `Armed` 可以授权递归删除，最终删除仍必须在同一打开句柄上复验目标身份；无 receipt 的槽只确认缺失，绝不执行无身份删除。卸载逻辑完成与物理回收之间允许跨进程、跨窗口生命周期，journal 在后台进程退出前不得提前删除。原始 JSON 严格要求当前全部字段及其类型，缺失值不能默认成 `false`。journal 自身读写使用扩展路径，原子临时名不会重新引入传统 `MAX_PATH` 限制。
+记录操作 ID、安装 ID、操作类型和阶段枚举，以及恢复所需的初始拓扑和选项快照。更新、回滚和卸载共享当前唯一结构，不读取旧 journal，也不根据目录拓扑补造事务授权。清理 receipt 使用 `Prepared -> Armed`：`Prepared` 同时绑定来源目录身份和安装 marker 文件的持久 File ID，已经验证所有权的来源句柄必须跨越 journal 落盘与目录移动；移动后再从同一句柄取得最终 tombstone 身份，并把 `Armed` 与对应 `Detached` 阶段作为同一个候选记录原子写入。Prepared 崩溃恢复必须同时复验来源目录和 marker；目录 ID 因文件系统语义变化时保持 pending，不猜测恢复。只有 `Armed` 可以授权递归删除，最终删除仍必须在同一打开句柄上复验目标身份；无 receipt 的槽只确认缺失，绝不执行无身份删除。更新或卸载的逻辑完成与物理回收之间允许跨进程、跨窗口生命周期，journal 在后台进程完成前不得提前删除。原始 JSON 严格要求当前全部字段及其类型，缺失值不能默认成 `false`。journal 自身读写使用扩展路径，原子临时名不会重新引入传统 `MAX_PATH` 限制。
 
 ### 安装身份、来源与健康
 
@@ -128,11 +128,11 @@ MainWindow
 
 兼容设置的进程关闭发生在持有安装根操作锁之后。`CompatibilityMaintenance.PreflightApply` 先验证安装健康门、所有权、安装 ID 和安装根 File ID，再允许 `ProcessesUnderPath` 停止目录内进程；停止后通过预检快照复验目标未变化，随后 `Apply` 继续执行完整校验和事务写入。该双重校验保证任意目录、非 Codex payload 或竞态替换目标不会仅因用户点击兼容操作就先被结束进程。
 
-新版本 staging 先建立官方 provenance 基线，再按部署引擎从旧安装文件解析出的实际状态执行兼容事务；新安装则使用全关闭选项。任一功能开启时只备份并验证 ASAR、sandbox helper 和 marker。失败功能只要 `Changed=false` 且 `Before==After`，就保持原文件不变，不阻止同一事务中其他独立成功功能提交；语言内部的菜单与推理组件也分别暂存和恢复。任何失败功能已经修改文件且无法证明恢复、逐项结果自相矛盾、marker/摘要写入失败或事务基础设施异常时，仍整体回滚受保护文件。最终 provenance 记录结果用于审计和完整性校验，但不能替代后续现场检测。
+新版本 staging 先建立官方 provenance 基线，再按部署引擎从旧安装文件解析出的实际状态执行兼容事务；新安装则使用全关闭选项。继承目标在新版本中明确 `Unsupported` 且没有受管标记或文件变更时，staging 专用协调入口将其归一为官方关闭的 `NotRequired`，不把部署报告成部分失败；独立手动应用入口仍严格报告无法开启。任一功能开启时只备份并验证 ASAR、sandbox helper 和 marker。失败功能只要 `Changed=false` 且 `Before==After`，就保持原文件不变，不阻止同一事务中其他独立成功功能提交；语言内部的菜单与推理组件也分别暂存和恢复。任何失败功能已经修改文件且无法证明恢复、逐项结果自相矛盾、marker/摘要写入失败或事务基础设施异常时，仍整体回滚受保护文件。最终 provenance 记录结果用于审计和完整性校验，但不能替代后续现场检测。
 
 `AsarSession` 是唯一的 ASAR 结构解析与写入实现。打开时只解析头部和条目元数据，目标条目按需读取并验证完整性，未修改条目在输出时从源文件流式复制。单个功能的多步暂存使用可回滚 checkpoint，失败不能夹带部分暂存进入其他成功功能；所有变换统一更新结构化哈希元数据，经临时文件重新打开和目标状态验证后，只执行一次原子替换。写回严格遵循官方 Pickle 头格式：JSON 字段记录未补齐字节数，对齐区使用 `0x00`；因此可逆变换关闭后能恢复官方 ASAR 的同一 SHA-256。
 
-每个受管功能内部使用 `Official`、`Patched`、`Mixed`、`Unsupported` 四态。只有 Official 与 Patched 可以相互转换；Mixed 必须拒绝修改。现场读取还允许 `UnmanagedOrOfficial` 和 `NativeSupported`：前者表示未知结构中没有受管标记，后者表示官方已经原生提供目标能力，两者都解析为开关关闭且不会触发文件写入。
+每个受管功能内部使用 `Official`、`Patched`、`Mixed`、`Unsupported` 四态。只有 Official 与 Patched 可以相互转换；Mixed 必须拒绝修改。现场读取还允许 `UnmanagedOrOfficial` 和 `NativeSupported`：前者表示未知结构中没有受管标记，后者表示官方已经原生提供目标能力。能够确认官方关闭且配方可用时开关保持可操作；`Unsupported` 则强制显示关闭、禁用开关并附简要原因，不触发文件写入。
 
 ### InstallLocationResolver
 
@@ -146,7 +146,7 @@ MainWindow
 
 `ShellIntegration` 继续保持单一具体静态模块，并以 `partial` 文件分别承载门面 API、注册编排、清理事务、状态归属和平台适配；实际注册表/快捷方式写入与三态归属读取分别下沉到无状态具体类 `ShellRegistrationWriter` 和 `ShellOwnershipChecker`，不引入接口或 DI。`NativeFileSystem`、`MsixPackageTrust`、`ProcessesUnderPath`、各兼容模块和锁实现同样保持具体模块。协议、扩展名、ProgID、AppUserModelID 和可执行文件名的 canonical 安全规则集中在 `ShellResourceNameRules`，注册前的清单值规范化仍由 `ShellIntegration` 负责。只有出现真实替换需求时才引入接口。
 
-模型目录、菜单提交、托盘和性能跟踪入口由内嵌 Esprima 建立只读 AST 索引，以成员关系、对象属性、数据流和调用上下文定位原始源码区间；同一源码版本只解析一次，预序索引记录连续子树区间，避免子节点查询重复扫描整个 bundle。JavaScript 正则字面量保留词法节点和源码区间，但不转换或编译为 .NET 正则，因此新版 ECMAScript Unicode 属性不会阻断与正则无关的菜单分析。变换只包裹或替换唯一确认的区间，不重新生成 JavaScript bundle；前序编辑改变文本长度后，后续编辑必须重新分析当前文本生成坐标。模型补丁把官方过滤表达式保留在不可达分支中，关闭时直接恢复原文。推理强度从 `composer.mode.local.reasoning.<level>.label` 键族动态发现，少量新增或减少档位不会要求更新固定清单。中文菜单资源和主进程脚本独立提交：匹配部分应用，未匹配部分保留官方状态并返回兼容提示；受管标记损坏、恢复不确定或候选不唯一的部分仍失败关闭。开发期只接受当前配方，不维护旧补丁迁移分支。产品不安装 loader、preload 或 Electron Hook，不执行运行时注入。
+模型目录、菜单提交、托盘和性能跟踪入口由内嵌 Esprima 建立只读 AST 索引，以成员关系、对象属性、数据流和调用上下文定位原始源码区间；同一源码版本只解析一次，预序索引记录连续子树区间，避免子节点查询重复扫描整个 bundle。模型目录在完整 AST 前先以可解码属性名建立轻量候选索引，原始、Unicode、十六进制、八进制和字符串身份转义都进入同一判断；索引异常或零候选时回退原有全量扫描，不能把索引结果当成兼容白名单。临时 ASAR 已完成全条目 integrity 校验后，只复验原分析确认且唯一被修改的模型条目；事务提交成功时 UI 直接采用该验证结果，事务未提交、旧现场状态缺失或路径修订变化时仍重新读取文件。JavaScript 正则字面量保留词法节点和源码区间，但不转换或编译为 .NET 正则，因此新版 ECMAScript Unicode 属性不会阻断与正则无关的菜单分析。变换只包裹或替换唯一确认的区间，不重新生成 JavaScript bundle；前序编辑改变文本长度后，后续编辑必须重新分析当前文本生成坐标。模型补丁把官方过滤表达式保留在不可达分支中，关闭时直接恢复原文。推理强度从 `composer.mode.local.reasoning.<level>.label` 键族动态发现，少量新增或减少档位不会要求更新固定清单。中文菜单资源和主进程脚本独立提交：匹配部分应用，未匹配部分保留官方状态并返回兼容提示；受管标记损坏、恢复不确定或候选不唯一的部分仍失败关闭。开发期只接受当前配方，不维护旧补丁迁移分支。产品不安装 loader、preload 或 Electron Hook，不执行运行时注入。
 
 EXE 图标、独立 ICO 和窗口 ICO 均先复制到同目录临时文件，完成资源/格式复验后原子替换；正式 EXE 不再传给 `BeginUpdateResource`。沙箱账户环境修正与其他 ASAR 功能共用临时文件验证和原子替换；官方签名 helper 只作为来源派生制品校验，永远不进入兼容写入事务。
 

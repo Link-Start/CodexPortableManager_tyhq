@@ -42,6 +42,13 @@ internal static partial class RegressionTestRunner
             {
                 return SaveConfigPart(args);
             }
+            if (args.Length > 0 && string.Equals(
+                args[0],
+                "--start-post-deployment-cleanup-and-exit",
+                StringComparison.Ordinal))
+            {
+                return StartPostDeploymentCleanupAndExit(args);
+            }
 
             if (args.Length != 3)
             {
@@ -117,6 +124,7 @@ internal static partial class RegressionTestRunner
             RunCase("previous-only 历史状态可以直接事务化卸载", TestPreviousOnlyUninstall);
             RunCase("逻辑卸载立即分离活动目录并保留可恢复清理事务", TestDeferredUninstallDetachesBeforeCleanup);
             RunCase("独立卸载清理进程完成 tombstone 和 journal 回收", TestUninstallCleanupWorkerProcess);
+            RunCase("独立部署后清理进程完成旧备份和 journal 回收", TestPostDeploymentCleanupWorkerProcess);
 
             RunCase("两个进程对同一安装根的操作锁互斥", TestCrossProcessOperationLock);
             RunCase("操作锁对 junction 别名和未创建目录保持互斥", TestOperationLockPathAliases);
@@ -330,6 +338,21 @@ internal static partial class RegressionTestRunner
         {
             held.Dispose();
         }
+    }
+
+    private static int StartPostDeploymentCleanupAndExit(string[] args)
+    {
+        if (args.Length != 3)
+        {
+            return 64;
+        }
+
+        LoadManager(Path.GetFullPath(args[1]));
+        using (CodexPortableService service = new CodexPortableService(delegate { }))
+        {
+            service.StartPostDeploymentCleanupAsync(Path.GetFullPath(args[2]));
+        }
+        return 0;
     }
 
     private static void LoadManager(string path)

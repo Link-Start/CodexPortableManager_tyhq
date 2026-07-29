@@ -295,7 +295,7 @@ namespace CodexPortableManager
             }
         }
 
-        private static bool IsApplied(CompatibilityObservedFeature feature)
+        internal static bool IsApplied(CompatibilityObservedFeature feature)
         {
             if (feature == null) return false;
             if (string.Equals(feature.FeatureId, "SandboxCompatibility", StringComparison.OrdinalIgnoreCase))

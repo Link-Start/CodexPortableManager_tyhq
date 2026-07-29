@@ -25,6 +25,11 @@ namespace CodexPortableManager
             AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             int cleanupExitCode;
+            if (PostDeploymentCleanupWorker.TryRun(args, out cleanupExitCode))
+            {
+                Environment.ExitCode = cleanupExitCode;
+                return;
+            }
             if (UninstallCleanupWorker.TryRun(args, out cleanupExitCode))
             {
                 Environment.ExitCode = cleanupExitCode;

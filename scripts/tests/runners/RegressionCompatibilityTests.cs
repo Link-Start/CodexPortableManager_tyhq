@@ -31,8 +31,9 @@ internal static partial class RegressionTestRunner
         const string officialExpression =
             "catalogEnabled ? availableSet.has(candidate.model) : !candidate.hidden";
         byte[] payload = Encoding.UTF8.GetBytes(
-            "const available_models=[];const source='available_models';const visible=" +
-            officialExpression + ";const after=1;");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:availableSet,catalogEnabled},candidate){return " +
+            officialExpression + ";}const after=1;");
         string payloadHash = ComputeSha256Hex(payload);
         string header =
             "{\"files\":{\"webview/assets/catalog-model-panel-test.js\":{\"size\":" + payload.Length.ToString(CultureInfo.InvariantCulture) +
@@ -97,7 +98,8 @@ internal static partial class RegressionTestRunner
         File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
 
         byte[] unrelatedPayload = Encoding.UTF8.GetBytes(
-            "const available_models=[];const unrelated=u?n.has(r.model):!r.hidden;");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         byte[] unrelatedArchive = BuildTestAsar(
             "{\"files\":{" + BuildAsarEntryJson("unrelated.js", unrelatedPayload, 0) + "}}",
             unrelatedPayload);
@@ -108,7 +110,7 @@ internal static partial class RegressionTestRunner
             "无关 JS 路径被模型配方修改。");
 
         byte[] missingContextPayload = Encoding.UTF8.GetBytes(
-            "const unrelated=u?n.has(r.model):!r.hidden;");
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         byte[] missingContextArchive = BuildTestAsar(
             "{\"files\":{" + BuildAsarEntryJson(
                 "webview/assets/model-list-filter-test.js",
@@ -122,7 +124,7 @@ internal static partial class RegressionTestRunner
             "缺少模型选择器上下文的 ASAR 被修改。");
 
         byte[] separatedFilterEntry = Encoding.UTF8.GetBytes(
-            "const visible=u?n.has(r.model):!r.hidden;");
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         byte[] separatedQueryEntry = Encoding.UTF8.GetBytes(
             "const source=`available_models`;");
         byte[] separatedPayload = CombineBytes(separatedFilterEntry, separatedQueryEntry);
@@ -145,9 +147,99 @@ internal static partial class RegressionTestRunner
             BytesEqual(File.ReadAllBytes(asarPath), separatedArchive),
             "分离上下文模型补丁无法完整往返恢复。");
 
+        byte[] fallbackFilterEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
+        byte[] fallbackUncertainEntry = Encoding.UTF8.GetBytes(
+            "const has=model=hidden=;{");
+        byte[] fallbackPayload = CombineBytes(fallbackFilterEntry, fallbackUncertainEntry);
+        byte[] fallbackArchive = BuildTestAsar(
+            "{\"files\":{" +
+            BuildAsarEntryJson(
+                "webview/assets/model-filter-fallback.js",
+                fallbackFilterEntry,
+                0) + "," +
+            BuildAsarEntryJson(
+                "webview/assets/runtime-uncertain.js",
+                fallbackUncertainEntry,
+                fallbackFilterEntry.Length) +
+            "}}",
+            fallbackPayload);
+        File.WriteAllBytes(asarPath, fallbackArchive);
+        Assert(ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), fallbackArchive),
+            "快速索引遇到无法解析的候选脚本时没有回退原有语义扫描。");
+
+        byte[] mergedChunkEntry = Encoding.UTF8.GetBytes(
+            "const a={available_models:[]},b={available_models:[]},c={available_models:[]}," +
+            "d={available_models:[]};" +
+            "function filter({availableModels:n,useHiddenModels:u},r){" +
+            "return u?n.has(r.model):!r.hidden;}");
+        byte[] mergedChunkArchive = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/app-initial-merged.js",
+                mergedChunkEntry,
+                0) + "}}",
+            mergedChunkEntry);
+        File.WriteAllBytes(asarPath, mergedChunkArchive);
+        Assert(ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), mergedChunkArchive),
+            "模型资源合并到含多个 available_models 键的大 chunk 后无法按参数数据流往返。");
+
+        byte[] escapedBindingEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function filter({avail\\u0061bleModels:n},r){" +
+            "return u?n[\"h\\x61s\"](r[\"mo\\u0064el\"]):!r[\"hid\\144en\"];}");
+        byte[] escapedBindingArchive = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/app-initial-escaped.js",
+                escapedBindingEntry,
+                0) + "}}",
+            escapedBindingEntry);
+        File.WriteAllBytes(asarPath, escapedBindingArchive);
+        Assert(ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), escapedBindingArchive),
+            "转义后的 availableModels/has/model/hidden 属性没有被快速索引或 AST 正确识别。");
+
+        byte[] mismatchedBindingEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:x},r){return u?n.has(r.model):!r.hidden;}");
+        byte[] mismatchedBindingArchive = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/model-filter-binding-mismatch.js",
+                mismatchedBindingEntry,
+                0) + "}}",
+            mismatchedBindingEntry);
+        File.WriteAllBytes(asarPath, mismatchedBindingArchive);
+        Assert(!ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), mismatchedBindingArchive),
+            "模型集合未绑定 availableModels 参数时仍被错误修改。");
+
+        byte[] shadowedBindingEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function outer({availableModels:n}){" +
+            "return function inner(n,r){return u?n.has(r.model):!r.hidden;};}");
+        byte[] shadowedBindingArchive = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/model-filter-shadowed-binding.js",
+                shadowedBindingEntry,
+                0) + "}}",
+            shadowedBindingEntry);
+        File.WriteAllBytes(asarPath, shadowedBindingArchive);
+        Assert(!ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), shadowedBindingArchive),
+            "内层同名参数遮蔽外层 availableModels 绑定时仍被错误修改。");
+
         byte[] duplicateInlineEntry = Encoding.UTF8.GetBytes(
-            "const available_models=[];const visible=u?n.has(r.model):!r.hidden;");
-        byte[] duplicatePayload = CombineBytes(duplicateInlineEntry, separatedQueryEntry);
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
+        byte[] duplicateFilterEntry = Encoding.UTF8.GetBytes(
+            "function second({avail\\u0061bleModels:n},r){" +
+            "return u?n[\"has\"](r[\"model\"]):!r[\"hidden\"];}");
+        byte[] duplicatePayload = CombineBytes(duplicateInlineEntry, duplicateFilterEntry);
         byte[] duplicateArchive = BuildTestAsar(
             "{\"files\":{" +
             BuildAsarEntryJson(
@@ -155,15 +247,15 @@ internal static partial class RegressionTestRunner
                 duplicateInlineEntry,
                 0) + "," +
             BuildAsarEntryJson(
-                "webview/assets/model-queries-test.js",
-                separatedQueryEntry,
+                "webview/assets/runtime-peer-test.js",
+                duplicateFilterEntry,
                 duplicateInlineEntry.Length) +
             "}}",
             duplicatePayload);
         File.WriteAllBytes(asarPath, duplicateArchive);
         Assert(!ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
             BytesEqual(File.ReadAllBytes(asarPath), duplicateArchive),
-            "模型上下文同时出现在内联和分离条目时仍被当作唯一语义锚点。");
+            "存在两个模型过滤候选时仍被当作唯一语义入口。");
 
     }
 
@@ -191,7 +283,8 @@ internal static partial class RegressionTestRunner
         File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
 
         byte[] payload = Encoding.UTF8.GetBytes(
-            "const available_models=[];const model=u?n.has(r.model):!r.hidden;");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         string header = "{\"files\":{" + BuildAsarEntryJson("webview/assets/model-list-filter-combined.js", payload, 0) + "}}";
         byte[] originalAsar = BuildTestAsar(header, payload);
         File.WriteAllBytes(asarPath, originalAsar);
@@ -269,6 +362,22 @@ internal static partial class RegressionTestRunner
         Assert(restored.LocalizationSucceeded &&
             BytesEqual(File.ReadAllBytes(asarPath), original),
             "部分成功场景关闭后没有字节级恢复原始 ASAR。");
+
+        List<string> stagingLogs = new List<string>();
+        CompatibilityResult stagingFallback = new CompatibilityCoordinator(stagingLogs.Add)
+            .ApplyOfficialStaging(
+                executablePath,
+                new CompatibilityOptions(false, true, false, false));
+        Assert(stagingFallback.AllSucceeded &&
+            stagingFallback.ModelCatalog.Status == CompatibilityFeatureStatus.NotRequired &&
+            string.Equals(stagingFallback.ModelCatalog.After, "Official", StringComparison.OrdinalIgnoreCase) &&
+            !stagingFallback.ModelCatalog.Changed &&
+            BytesEqual(File.ReadAllBytes(asarPath), original),
+            "可信 staging 遇到不支持的模型白名单结构时没有默认关闭并保持官方文件。");
+        Assert(stagingLogs.Any(value => value.IndexOf(
+                "已默认关闭",
+                StringComparison.Ordinal) >= 0),
+            "可信 staging 的不支持功能默认关闭没有记录简要原因。");
     }
 
     private static void TestCompatibilityFeatureResultsRemainDetailed()
@@ -281,7 +390,8 @@ internal static partial class RegressionTestRunner
         Directory.CreateDirectory(resourcesRoot);
         File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
         byte[] payload = Encoding.UTF8.GetBytes(
-            "const available_models=[];const visible=u?n.has(r.model):!r.hidden;");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         File.WriteAllBytes(
             asarPath,
             BuildTestAsar(
@@ -944,7 +1054,9 @@ internal static partial class RegressionTestRunner
         Directory.CreateDirectory(resourcesRoot);
         File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
 
-        byte[] modelEntry = Encoding.UTF8.GetBytes("const available_models=[];const visible=u?n.has(r.model):!r.hidden;");
+        byte[] modelEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         byte[] expectedUnmodified = Encoding.ASCII.GetBytes("trusted-unmodified-entry");
         byte[] corruptedUnmodified = (byte[])expectedUnmodified.Clone();
         corruptedUnmodified[corruptedUnmodified.Length - 1] ^= 0x01;
@@ -963,8 +1075,9 @@ internal static partial class RegressionTestRunner
             "未修改条目 integrity 校验失败没有进入明确日志。");
 
         byte[] alreadyPatchedEntry = Encoding.UTF8.GetBytes(
-            "const available_models=[];const visible=!r.hidden||(false&&" +
-            "(u?n.has(r.model):!r.hidden))" + ModelCatalogCompatibility.PatchedMarker + ";");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return !r.hidden||(false&&" +
+            "(u?n.has(r.model):!r.hidden))" + ModelCatalogCompatibility.PatchedMarker + ";}");
         string noChangeHeader = "{\"files\":{" +
                 BuildAsarEntryJson("webview/assets/model-list-filter-test.js", alreadyPatchedEntry, 0) + "," +
             BuildAsarEntryJson("unrelated.bin", expectedUnmodified, alreadyPatchedEntry.Length) + "}}";
@@ -1681,7 +1794,8 @@ internal static partial class RegressionTestRunner
         string combinedDetail = combinedProgress.Detail;
         Assert(combinedDetail.IndexOf("系统集成未能完整注册", StringComparison.Ordinal) >= 0,
             "旧备份待清理状态遮蔽了系统集成警告。");
-        Assert(combinedDetail.IndexOf("旧回滚备份暂未清理", StringComparison.Ordinal) >= 0,
+        Assert(combinedDetail.IndexOf("旧回滚备份已隔离", StringComparison.Ordinal) >= 0 &&
+            combinedDetail.IndexOf("独立后台进程", StringComparison.Ordinal) >= 0,
             "组合完成信息遗漏了旧备份待清理状态。");
 
         DeploymentResult compatibilityFailure = new DeploymentResult(
@@ -1977,7 +2091,8 @@ internal static partial class RegressionTestRunner
         string unmanagedId = Guid.NewGuid().ToString("N");
         CreateRunnableCodex(unmanagedRoot, "1.2.3.4", unmanagedId, "compatibility-status-unmanaged");
         byte[] unmanagedEntry = Encoding.UTF8.GetBytes(
-            "const available_models=[];const model=u?n.has(r.model):!r.hidden;");
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         File.WriteAllBytes(
             Path.Combine(unmanagedRoot, "app", "resources", "app.asar"),
             BuildTestAsar(
@@ -2023,14 +2138,22 @@ internal static partial class RegressionTestRunner
             "未知官方结构没有返回完整的现场状态。");
         CompatibilityObservedFeature sandbox = overview.Features.Single(feature =>
             feature.FeatureId == "SandboxCompatibility");
+        CompatibilityObservedFeature model = overview.Features.Single(feature =>
+            feature.FeatureId == "ModelCatalog");
         Assert(sandbox.After == "Unknown" &&
             sandbox.Status == CompatibilityFeatureStatus.Unsupported &&
-            overview.Features.Single(feature =>
-                feature.FeatureId == "ModelCatalog").After == "UnmanagedOrOfficial" &&
+            model.After == "Official" &&
+            model.Status == CompatibilityFeatureStatus.Unsupported &&
             overview.Features.Single(feature =>
                 feature.FeatureId == "Localization").After ==
                 "Menus=UnmanagedOrOfficial;Reasoning=UnmanagedOrOfficial",
-            "未知官方结构没有对沙箱功能严格失败关闭，或影响了其他独立功能的状态读取。");
+            "未知官方结构没有把不可用的沙箱和模型功能关闭，或影响了其他独立功能的状态读取。");
+
+        CompatibilitySwitchFacts unsupportedFacts =
+            CompatibilityStatusReader.ResolveSwitchFacts(overview);
+        Assert(!unsupportedFacts.SandboxCompatibilityEnabled.HasValue &&
+            !unsupportedFacts.UnlockModelCatalogEnabled.HasValue,
+            "当前版本不可用的功能仍被解析为可点击开关。");
 
         CompatibilityOptions resolved = CompatibilityStatusReader.ResolveOptions(overview);
         Assert(resolved == null,
@@ -2198,6 +2321,53 @@ internal static partial class RegressionTestRunner
         Assert(MainWindow.ResolveLocalizationCompatibilityState(recordOnly, "Menus") == null,
             "缺少现场分析结果时仍根据记录猜测中文菜单。");
 
+        CompatibilityResult committedModel = new CompatibilityResult
+        {
+            TransactionCommitted = true,
+            ModelCatalogSucceeded = true,
+            SandboxSucceeded = true,
+            LocalizationSucceeded = true,
+            ModelCatalog = new CompatibilityFeatureResult
+            {
+                FeatureId = "ModelCatalog",
+                DisplayName = "模型目录",
+                Before = "Official",
+                Desired = "Patched",
+                After = "Patched",
+                Changed = true,
+                Status = CompatibilityFeatureStatus.Applied,
+                RecipeId = ModelCatalogCompatibility.RecipeId
+            }
+        };
+        CompatibilityOptions manageModelOnly = new CompatibilityOptions(
+            true,
+            true,
+            true,
+            false,
+            false,
+            true,
+            false);
+        CompatibilityOverview committedOverview =
+            MainWindow.CreateCommittedCompatibilityOverview(
+                observed,
+                committedModel,
+                manageModelOnly);
+        Assert(committedOverview != null &&
+            committedOverview.Features.Single(feature =>
+                feature.FeatureId == "ModelCatalog").After == "Patched" &&
+            committedOverview.Features.Single(feature =>
+                feature.FeatureId == "SandboxCompatibility").After == "Enabled" &&
+            committedOverview.Features.Single(feature =>
+                feature.FeatureId == "Localization").After ==
+                "Menus=Patched;Reasoning=Official",
+            "已提交兼容结果没有只更新受管功能并保留其他现场事实。");
+        committedModel.TransactionCommitted = false;
+        Assert(MainWindow.CreateCommittedCompatibilityOverview(
+            observed,
+            committedModel,
+            manageModelOnly) == null,
+            "未提交事务仍绕过了完整现场状态读取。");
+
         MainWindow window = null;
         try
         {
@@ -2285,6 +2455,40 @@ internal static partial class RegressionTestRunner
                 "重新检查时没有保留可确认功能的会话草稿。");
             Assert(chinese.IsChecked == false && !chinese.IsEnabled,
                 "重新检查发现异常后没有清除异常功能的开启草稿。");
+
+            CompatibilityOverview unsupportedModel = new CompatibilityOverview(
+                CompatibilityOverviewState.Inspected,
+                "模型白名单入口不可用",
+                new[]
+                {
+                    new CompatibilityObservedFeature(
+                        "SandboxCompatibility", "Disabled",
+                        CompatibilityFeatureStatus.AlreadySatisfied, null,
+                        CompatibilityCoordinator.SandboxRecipeId, true),
+                    new CompatibilityObservedFeature(
+                        "ModelCatalog", "Official",
+                        CompatibilityFeatureStatus.Unsupported,
+                        "当前版本没有可安全修改的模型白名单入口。",
+                        ModelCatalogCompatibility.RecipeId, true),
+                    new CompatibilityObservedFeature(
+                        "Localization", "Menus=Official;Reasoning=Official",
+                        CompatibilityFeatureStatus.AlreadySatisfied, null,
+                        CodexLocalizationCompatibility.RecipeId, true)
+                },
+                new string[0],
+                true);
+            overviewField.SetValue(window, unsupportedModel);
+            snapshot = (OperationSnapshot)captureSnapshot.Invoke(window, null);
+            initializeSwitches.Invoke(window, new object[] { snapshot });
+            applyUiState.Invoke(window, null);
+            System.Windows.Controls.TextBlock modelStatus =
+                (System.Windows.Controls.TextBlock)window.FindName("modelCatalogStatusLabel");
+            Assert(model.IsChecked == false && !model.IsEnabled &&
+                string.Equals(modelStatus.Text, "不可用，已关闭", StringComparison.Ordinal) &&
+                (modelStatus.ToolTip as string ?? string.Empty).IndexOf(
+                    "模型白名单入口",
+                    StringComparison.Ordinal) >= 0,
+                "当前版本不可用的模型功能没有默认关闭、禁止点击或显示简要原因。");
         }
         finally
         {

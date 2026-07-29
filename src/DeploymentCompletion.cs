@@ -58,7 +58,7 @@ namespace CodexPortableManager
                 : !result.CompatibilitySucceeded
                     ? "Codex 便携版更新完成，部分功能设置等待适配"
                 : (result.OldBackupCleanupPending
-                    ? "Codex 便携版安装完成，存在待清理项目"
+                    ? "Codex 便携版安装完成，后台清理中"
                     : "Codex 便携版安装完成");
             return new OperationProgress(message, 100, JoinDetails(details));
         }
@@ -89,7 +89,7 @@ namespace CodexPortableManager
                 : !result.CompatibilitySucceeded
                     ? "迁移完成，部分功能设置等待适配"
                 : (result.OldBackupCleanupPending
-                    ? "迁移完成，存在待清理项目"
+                    ? "迁移完成，后台清理中"
                     : "迁移完成，已切换到 Codex 便携版");
             return new OperationProgress(message, 100, JoinDetails(details));
         }
@@ -129,7 +129,7 @@ namespace CodexPortableManager
         {
             if (result.OldBackupCleanupPending)
             {
-                details.Add("旧回滚备份暂未清理，下次启动将继续处理");
+                details.Add("旧回滚备份已隔离，独立后台进程将继续清理");
             }
         }
 

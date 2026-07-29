@@ -57,6 +57,7 @@ namespace CodexPortableManager
     internal sealed class CompatibilityMaintenance
     {
         private readonly Func<string, CompatibilityOptions, CompatibilityResult> applyCompatibility;
+        private readonly Func<string, CompatibilityOptions, CompatibilityResult> applyStagingCompatibility;
         private readonly Action<string, string, string, ArtifactProvenance> writeMarker;
         private readonly Action<string> log;
 
@@ -65,6 +66,9 @@ namespace CodexPortableManager
                 coordinator == null
                     ? (Func<string, CompatibilityOptions, CompatibilityResult>)null
                     : coordinator.Apply,
+                coordinator == null
+                    ? (Func<string, CompatibilityOptions, CompatibilityResult>)null
+                    : coordinator.ApplyOfficialStaging,
                 InstallOwnership.WriteMarker,
                 logAction)
         {
@@ -74,8 +78,19 @@ namespace CodexPortableManager
             Func<string, CompatibilityOptions, CompatibilityResult> applyAction,
             Action<string, string, string, ArtifactProvenance> markerWriter,
             Action<string> logAction)
+            : this(applyAction, applyAction, markerWriter, logAction)
+        {
+        }
+
+        private CompatibilityMaintenance(
+            Func<string, CompatibilityOptions, CompatibilityResult> applyAction,
+            Func<string, CompatibilityOptions, CompatibilityResult> applyStagingAction,
+            Action<string, string, string, ArtifactProvenance> markerWriter,
+            Action<string> logAction)
         {
             applyCompatibility = applyAction ?? throw new ArgumentNullException(nameof(applyAction));
+            applyStagingCompatibility = applyStagingAction ??
+                throw new ArgumentNullException(nameof(applyStagingAction));
             writeMarker = markerWriter ?? throw new ArgumentNullException(nameof(markerWriter));
             log = logAction ?? delegate { };
         }
@@ -223,7 +238,9 @@ namespace CodexPortableManager
                         InstallOwnership.MarkerFileName,
                         StringComparison.OrdinalIgnoreCase)));
                 transaction.BeginMutation();
-                CompatibilityResult result = applyCompatibility(executablePath, options);
+                CompatibilityResult result = (preserveFailureOutcome
+                    ? applyStagingCompatibility
+                    : applyCompatibility)(executablePath, options);
                 if (result == null)
                 {
                     throw new InvalidOperationException("兼容协调器没有返回应用结果。");

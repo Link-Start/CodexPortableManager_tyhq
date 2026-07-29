@@ -93,6 +93,14 @@ namespace CodexPortableManager
 
         internal CompatibilityPlanResult Apply(string executablePath, CompatibilityOptions options)
         {
+            return Apply(executablePath, options, false);
+        }
+
+        internal CompatibilityPlanResult Apply(
+            string executablePath,
+            CompatibilityOptions options,
+            bool defaultUnsupportedToDisabled)
+        {
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (!options.ManageModelCatalog &&
                 !options.ManageSandboxCompatibility &&
@@ -108,18 +116,19 @@ namespace CodexPortableManager
                 options.SandboxCompatibilityEnabled,
                 options.ManageLocalization,
                 options.SupplementChineseUiEnabled,
-                options.EnglishTechnicalParametersEnabled);
+                options.EnglishTechnicalParametersEnabled,
+                defaultUnsupportedToDisabled);
         }
 
         internal bool ApplyModel(string executablePath, bool enabled)
         {
-            return ApplyInternal(executablePath, true, enabled, false, false, false, false, false)
+            return ApplyInternal(executablePath, true, enabled, false, false, false, false, false, false)
                 .ModelCatalogSucceeded;
         }
 
         internal bool ApplySandbox(string executablePath, bool enabled)
         {
-            return ApplyInternal(executablePath, false, false, true, enabled, false, false, false)
+            return ApplyInternal(executablePath, false, false, true, enabled, false, false, false, false)
                 .SandboxSucceeded;
         }
 
@@ -133,7 +142,8 @@ namespace CodexPortableManager
                 false,
                 true,
                 chineseMenusEnabled,
-                englishReasoningEnabled).LocalizationSucceeded;
+                englishReasoningEnabled,
+                false).LocalizationSucceeded;
         }
 
         private CompatibilityPlanResult ApplyInternal(
@@ -144,7 +154,8 @@ namespace CodexPortableManager
             bool sandboxEnabled,
             bool includeLocalization,
             bool chineseMenusEnabled,
-            bool englishReasoningEnabled)
+            bool englishReasoningEnabled,
+            bool defaultUnsupportedToDisabled)
         {
             CompatibilityPlanResult result = new CompatibilityPlanResult();
             string asarPath;
@@ -253,6 +264,29 @@ namespace CodexPortableManager
                     modelEnabled,
                     log)
                 : CompatibilityFeatureChange.Unmanaged(CompatibilityPatchState.Official.ToString());
+            if (defaultUnsupportedToDisabled &&
+                modelEnabled &&
+                modelChange.Status == CompatibilityFeatureStatus.Unsupported &&
+                !modelChange.Changed &&
+                string.Equals(
+                    modelChange.Before,
+                    CompatibilityPatchState.Official.ToString(),
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    modelChange.After,
+                    CompatibilityPatchState.Official.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                string reason = modelChange.Error;
+                modelChange.Succeeded = true;
+                modelChange.Desired = CompatibilityPatchState.Official.ToString();
+                modelChange.Status = CompatibilityFeatureStatus.NotRequired;
+                modelChange.Error = string.IsNullOrWhiteSpace(reason)
+                    ? "当前版本不支持该功能，已默认关闭。"
+                    : "当前版本不支持该功能，已默认关闭：" + reason;
+                modelChange.CompletionMessage =
+                    "当前版本没有可安全修改的模型白名单入口，外部模型显示功能已默认关闭。";
+            }
             CompatibilityFeatureChange sandboxChange = sandboxActive
                 ? SandboxCompatibility.Plan(
                     session,

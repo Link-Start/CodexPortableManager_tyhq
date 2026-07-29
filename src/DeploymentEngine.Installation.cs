@@ -74,11 +74,6 @@ namespace CodexPortableManager
             {
                 await PortableStorage.MigrateLegacyCacheAsync(progress, cancellationToken).ConfigureAwait(false);
             }
-            if (!package.localCacheOnly)
-            {
-                StorageMaintenance.RunBestEffort(log);
-            }
-
             if (!allowDowngrade && currentVersion != null &&
                 (currentVersion > remoteVersion || (!force && currentVersion == remoteVersion)))
             {
@@ -250,22 +245,12 @@ namespace CodexPortableManager
                         DeploymentTransactionPhase.UpdateExternalStateUpdated);
                     if (oldPreviousMoved)
                     {
-                        progress.Report(new OperationProgress("清理旧回滚备份", 98, "正在删除更早的 .previous 版本；大量小文件可能需要一些时间。"));
-                        Stopwatch cleanupStopwatch = Stopwatch.StartNew();
-                        log("开始清理旧回滚备份：" + transactionOld);
-                        oldBackupCleanupPending = !TryDeleteCleanupDirectory(
-                            updateJournal,
-                            updateJournal.UpdateOldPreviousCleanup,
-                            transactionOld,
-                            parentRoot,
-                            "旧回滚备份");
-                        cleanupStopwatch.Stop();
-                        log(string.Format(
-                            CultureInfo.InvariantCulture,
-                            oldBackupCleanupPending
-                                ? "旧回滚备份暂未清理完成，耗时 {0:F1} 秒；下次启动将继续处理。"
-                                : "旧回滚备份清理完成，耗时 {0:F1} 秒。",
-                            cleanupStopwatch.Elapsed.TotalSeconds));
+                        progress.Report(new OperationProgress(
+                            "安排后台清理旧回滚备份",
+                            98,
+                            "更早的 .previous 已安全移入事务目录，将由独立后台进程清理。"));
+                        oldBackupCleanupPending = true;
+                        log("旧回滚备份已隔离并保留安全清理凭据，将在安装提交后由独立后台进程清理：" + transactionOld);
                     }
                     if (!oldBackupCleanupPending)
                     {
@@ -323,17 +308,28 @@ namespace CodexPortableManager
             {
                 if (File.Exists(downloadPath))
                 {
+                    Stopwatch downloadCleanup = Stopwatch.StartNew();
                     TryDeleteFile(downloadPath, "未完成的下载临时文件");
+                    downloadCleanup.Stop();
+                    log(string.Format(
+                        CultureInfo.InvariantCulture,
+                        "下载临时文件同步清理耗时 {0:F1} 秒。",
+                        downloadCleanup.Elapsed.TotalSeconds));
                 }
                 if (Directory.Exists(workRoot))
                 {
+                    Stopwatch workCleanup = Stopwatch.StartNew();
                     TryDeleteDirectory(
                         workRoot,
                         workParent,
                         "临时工作目录",
                         workRootIdentity);
+                    workCleanup.Stop();
+                    log(string.Format(
+                        CultureInfo.InvariantCulture,
+                        "临时工作目录同步清理耗时 {0:F1} 秒。",
+                        workCleanup.Elapsed.TotalSeconds));
                 }
-                StorageMaintenance.RunBestEffort(log);
             }
         }
 

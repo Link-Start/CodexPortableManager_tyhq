@@ -121,7 +121,14 @@ namespace CodexPortableManager
                 localStatus = await localTask;
                 ApplyLocalPathStatus(snapshot, localStatus, true, false, false);
                 if (localStatusApplied != null) localStatusApplied(localStatus);
-                await LoadCompatibilityOverviewAsync(snapshot, false, token, true);
+                if (localStatus.OldBackupCleanupPending)
+                {
+                    ResetCompatibilityOverviewForPendingCleanup();
+                }
+                else
+                {
+                    await LoadCompatibilityOverviewAsync(snapshot, false, token, true);
+                }
                 status = await statusTask;
             }
             catch
@@ -376,8 +383,24 @@ namespace CodexPortableManager
         {
             PortableLocalStatus status = await service.GetLocalStatusAsync(snapshot.InstallRoot, CancellationToken.None);
             ApplyLocalPathStatus(snapshot, status, allowWhileBusy, updateProgressText);
-            await LoadCompatibilityOverviewAsync(snapshot, false, CancellationToken.None, allowWhileBusy);
+            if (status.OldBackupCleanupPending)
+            {
+                ResetCompatibilityOverviewForPendingCleanup();
+            }
+            else
+            {
+                await LoadCompatibilityOverviewAsync(snapshot, false, CancellationToken.None, allowWhileBusy);
+            }
             return status;
+        }
+
+        private void ResetCompatibilityOverviewForPendingCleanup()
+        {
+            compatibilityOverview = null;
+            compatibilityOverviewPathRevision = -1;
+            compatibilityApplyNeeded = false;
+            UpdateCompatibilityPresentation();
+            ApplyUiState();
         }
 
         private void ApplyLocalPathStatus(

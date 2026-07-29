@@ -16,19 +16,20 @@ namespace CodexPortableManager
 
         public CompatibilityResult Apply(string executablePath, CompatibilityOptions compatibility)
         {
-            return ApplyInternal(executablePath, compatibility);
+            return ApplyInternal(executablePath, compatibility, false);
         }
 
         internal CompatibilityResult ApplyOfficialStaging(
             string executablePath,
             CompatibilityOptions compatibility)
         {
-            return ApplyInternal(executablePath, compatibility);
+            return ApplyInternal(executablePath, compatibility, true);
         }
 
         private CompatibilityResult ApplyInternal(
             string executablePath,
-            CompatibilityOptions compatibility)
+            CompatibilityOptions compatibility,
+            bool defaultUnsupportedToDisabled)
         {
             if (compatibility == null) throw new ArgumentNullException(nameof(compatibility));
 
@@ -55,7 +56,8 @@ namespace CodexPortableManager
                 compatibility.ManageLocalization);
             CompatibilityPlanResult asar = new CompatibilityPlan(log).Apply(
                 executablePath,
-                effective);
+                effective,
+                defaultUnsupportedToDisabled);
             string sandboxDesired = !manageSandbox
                 ? "NotManaged"
                 : compatibility.SandboxCompatibilityEnabled

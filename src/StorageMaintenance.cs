@@ -97,6 +97,10 @@ namespace CodexPortableManager
             @"^fatal-error-[0-9]{8}-[0-9]{9}-[0-9a-f]{32}\.log$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+        private static readonly Regex PostDeploymentCleanupLogRegex = new Regex(
+            @"^post-deployment-cleanup-[0-9]{8}-[0-9]{9}-[0-9a-f]{32}\.log$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
         private static readonly Regex WorkDirectoryRegex = new Regex(
             @"^\.cpm-(?<id>[0-9a-f]{32})$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -482,7 +486,8 @@ namespace CodexPortableManager
                 .Where(value =>
                     SessionLogRegex.IsMatch(value.Name) ||
                     StorageErrorLogRegex.IsMatch(value.Name) ||
-                    FatalErrorLogRegex.IsMatch(value.Name))
+                    FatalErrorLogRegex.IsMatch(value.Name) ||
+                    PostDeploymentCleanupLogRegex.IsMatch(value.Name))
                 .ToList();
             DateTime cutoff = utcNow.Subtract(retention);
             foreach (OrdinaryFileCandidate file in managedLogs.Where(

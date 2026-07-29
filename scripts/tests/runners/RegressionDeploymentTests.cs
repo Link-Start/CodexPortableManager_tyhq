@@ -1433,15 +1433,26 @@ internal static partial class RegressionTestRunner
                 File.Exists(DeploymentJournal.GetPath(installRoot)),
                 "清理失败后没有保留可重试的旧备份和 journal。");
 
+            PortableLocalStatus stillPending = service.GetLocalStatus(installRoot);
+            Assert(stillPending.Error == null &&
+                stillPending.PortableVersion == new Version(3, 0, 0, 0) &&
+                stillPending.OldBackupCleanupPending &&
+                Directory.Exists(transactionRoot) &&
+                DeploymentJournal.Exists(installRoot),
+                "普通状态读取在释放占用后同步执行了已提交清理。");
+
+            Assert(service.CompletePendingDeploymentCleanup(installRoot),
+                "显式后台恢复入口没有完成已提交更新清理：" +
+                string.Join(" | ", logs.ToArray()));
             PortableLocalStatus completed = service.GetLocalStatus(installRoot);
             Assert(completed.Error == null &&
                 completed.PortableVersion == new Version(3, 0, 0, 0) &&
                 !completed.OldBackupCleanupPending,
-                "释放占用后没有完成旧备份清理并保持当前版本可用：" +
+                "后台清理后没有保持当前版本可用：" +
                 completed.Error + "；" + string.Join(" | ", logs.ToArray()));
         }
 
-        Assert(!Directory.Exists(transactionRoot), "释放占用后旧回滚备份仍未清理。");
+        Assert(!Directory.Exists(transactionRoot), "后台恢复后旧回滚备份仍未清理。");
         Assert(!File.Exists(DeploymentJournal.GetPath(installRoot)), "清理完成后仍残留更新 journal。");
     }
 
@@ -1904,6 +1915,62 @@ internal static partial class RegressionTestRunner
             "独立卸载清理进程退出后仍残留 current tombstone。");
         Assert(!DeploymentJournal.Exists(installRoot),
             "独立卸载清理进程退出后仍残留 deployment journal。");
+    }
+
+    private static void TestPostDeploymentCleanupWorkerProcess()
+    {
+        string caseRoot = NewCaseRoot("post-deployment-cleanup-worker");
+        string installRoot = Path.Combine(caseRoot, "CodexDesktop");
+        string previousRoot = installRoot + ".previous";
+        string transactionRoot = previousRoot + ".transaction-old";
+        string installId = Guid.NewGuid().ToString("N");
+        CreateMinimalCodex(installRoot, "3.0.0.0", installId, "worker-current");
+        CreateMinimalCodex(previousRoot, "2.0.0.0", installId, "worker-previous");
+        CreateMinimalCodex(transactionRoot, "1.0.0.0", installId, "worker-obsolete");
+        CreateDeploymentJournal(
+            "Update",
+            "UpdateExternalStateUpdated",
+            installRoot,
+            installId,
+            true,
+            true);
+
+        string testRunnerPath = Assembly.GetExecutingAssembly().Location;
+        using (OperationFileLock held = OperationFileLock.Acquire(installRoot))
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = testRunnerPath,
+                Arguments = "--regression-child --start-post-deployment-cleanup-and-exit " +
+                    QuoteArgument(managerPath) + " " + QuoteArgument(installRoot),
+                WorkingDirectory = Path.GetDirectoryName(testRunnerPath),
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using (Process launcher = Process.Start(startInfo))
+            {
+                Assert(launcher != null, "无法启动部署后清理派发父进程。");
+                Assert(launcher.WaitForExit(10000),
+                    "部署后清理派发父进程在 10 秒内没有退出。");
+                Assert(launcher.ExitCode == 0,
+                    "部署后清理派发父进程异常退出：" + launcher.ExitCode + "。");
+                Assert(Directory.Exists(transactionRoot) && DeploymentJournal.Exists(installRoot),
+                    "父进程退出前，受操作锁阻塞的清理子进程错误完成了事务。");
+            }
+        }
+
+        Stopwatch cleanupWait = Stopwatch.StartNew();
+        while (DeploymentJournal.Exists(installRoot) &&
+            cleanupWait.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            Thread.Sleep(50);
+        }
+        AssertVersionAt(installRoot, "worker-current", "3.0.0.0");
+        AssertVersionAt(previousRoot, "worker-previous", "2.0.0.0");
+        Assert(!Directory.Exists(transactionRoot),
+            "派发父进程退出后，独立清理进程仍残留旧回滚事务目录。");
+        Assert(!DeploymentJournal.Exists(installRoot),
+            "派发父进程退出后，独立清理进程仍残留 deployment journal。");
     }
 
     private static void CreateUninstallJournal(

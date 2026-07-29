@@ -214,6 +214,16 @@ internal static partial class RegressionTestRunner
             "fatal-error-20260501-120000000-" + Guid.NewGuid().ToString("N") + ".log",
             "fatal-log",
             utcNow.AddDays(-40));
+        string expiredPostDeploymentCleanupLog = CreateTimedFile(
+            logsRoot,
+            "post-deployment-cleanup-20260501-120000000-" + Guid.NewGuid().ToString("N") + ".log",
+            "cleanup-log",
+            utcNow.AddDays(-40));
+        string unknownCleanupLog = CreateTimedFile(
+            logsRoot,
+            "post-deployment-cleanup-unknown.log",
+            "unknown-cleanup-log",
+            utcNow.AddYears(-1));
         string unknownLog = CreateTimedFile(logsRoot, "keep-user.log", "unknown-log", utcNow.AddYears(-1));
 
         WithIsolatedLocalAppData("storage-maintenance-profile", delegate
@@ -243,14 +253,17 @@ internal static partial class RegressionTestRunner
 
             Assert(!File.Exists(oldLog), "超过日志保留期的受管日志没有清理。");
             Assert(!File.Exists(expiredFatalLog), "超过日志保留期的致命异常日志没有清理。");
+            Assert(!File.Exists(expiredPostDeploymentCleanupLog),
+                "超过日志保留期的部署后后台清理日志没有清理。");
             Assert(!File.Exists(recentOldest) && !File.Exists(recentMiddle), "日志总量上限没有优先清理较旧日志。");
             Assert(File.Exists(recentNewest), "日志总量策略错误删除了最新受管日志。");
+            Assert(File.Exists(unknownCleanupLog), "名称不完整的清理日志被错误纳入受管白名单。");
             Assert(File.Exists(unknownLog), "未知日志文件被错误清理。");
 
             Assert(result.DeletedPackageFiles == 3, "正式包删除计数不正确。");
             Assert(result.DeletedInvalidFiles == 2, "invalid 删除计数不正确。");
             Assert(result.DeletedDownloadFiles == 3, "下载与物化临时文件删除计数不正确。");
-            Assert(result.DeletedLogFiles == 4, "日志删除计数不正确。");
+            Assert(result.DeletedLogFiles == 5, "日志删除计数不正确。");
             Assert(result.ReclaimedBytes > 0, "回收字节数没有累计。");
         });
     }

@@ -18,14 +18,14 @@ namespace CodexPortableManager
 {
     internal sealed partial class MainWindow
     {
-        private async Task InstallOrUpdateAsync(
+        private async Task<DeploymentResult> InstallOrUpdateAsync(
             OperationSnapshot snapshot,
             CancellationToken token,
             LegacyAdoptionApproval adoptionApproval)
         {
             InvalidatePathStatus();
             IProgress<OperationProgress> progress = CreateProgress();
-            await service.InstallOrUpdateAsync(
+            DeploymentResult result = await service.InstallOrUpdateAsync(
                 snapshot.InstallRoot,
                 true,
                 progress,
@@ -33,6 +33,11 @@ namespace CodexPortableManager
                 token,
                 true,
                 adoptionApproval);
+            if (result.OldBackupCleanupPending &&
+                ApplyPostDeploymentCleanupPresentation(snapshot))
+            {
+                return result;
+            }
             PortableLocalStatus status = await RefreshLocalPathStatusAsync(snapshot, true, false);
             if (!string.IsNullOrWhiteSpace(status.Error) || status.PortableVersion == null)
             {
@@ -43,6 +48,7 @@ namespace CodexPortableManager
                         ? "部署事务已经结束，但当前目录未能识别出有效便携版；请重新检查版本并查看日志。"
                         : "部署事务已经结束，但重新读取目标目录时失败：" + status.Error));
             }
+            return result;
         }
 
         private async Task InstallButton_Click()
@@ -50,11 +56,29 @@ namespace CodexPortableManager
             if (!TryResolveInstallDestination()) return;
             LegacyAdoptionApproval adoptionApproval;
             if (!TryApproveLegacyAdoption(CaptureOperationSnapshot().InstallRoot, out adoptionApproval)) return;
+            Task<int> cleanupTask = null;
+            OperationSnapshot cleanupSnapshot = null;
             await RunOperationAsync(
-                (snapshot, token) => InstallOrUpdateAsync(snapshot, token, adoptionApproval),
+                async (snapshot, token) =>
+                {
+                    DeploymentResult result = await InstallOrUpdateAsync(snapshot, token, adoptionApproval);
+                    if (result.OldBackupCleanupPending)
+                    {
+                        cleanupSnapshot = snapshot;
+                        cleanupTask = service.StartPostDeploymentCleanupAsync(snapshot.InstallRoot);
+                    }
+                    else
+                    {
+                        ObserveStorageMaintenanceAsync(service.StartStorageMaintenanceAsync());
+                    }
+                },
                 true,
                 true,
                 OperationDisplayKind.Install);
+            if (cleanupTask != null && cleanupSnapshot != null)
+            {
+                await ObservePostDeploymentCleanupAsync(cleanupSnapshot, cleanupTask);
+            }
         }
 
         private async Task DownloadPackageButton_Click()
@@ -72,14 +96,26 @@ namespace CodexPortableManager
 
                 string destination = dialog.FileName;
                 string downloadedPath = null;
+                Task<int> maintenanceTask = null;
                 await RunOperationAsync(async (snapshot, token) =>
                 {
-                    downloadedPath = await service.DownloadOfficialPackageAsync(
-                        destination,
-                        CreateProgress(),
-                        operationController.PauseToken,
-                        token);
+                    try
+                    {
+                        downloadedPath = await service.DownloadOfficialPackageAsync(
+                            destination,
+                            CreateProgress(),
+                            operationController.PauseToken,
+                            token);
+                    }
+                    finally
+                    {
+                        maintenanceTask = service.StartStorageMaintenanceAsync();
+                    }
                 }, true, true, OperationDisplayKind.DownloadPackage);
+                if (maintenanceTask != null)
+                {
+                    ObserveStorageMaintenanceAsync(maintenanceTask);
+                }
 
                 if (string.IsNullOrWhiteSpace(downloadedPath) || !File.Exists(downloadedPath)) return;
                 if (MessageBox.Show(
@@ -128,7 +164,7 @@ namespace CodexPortableManager
             }
         }
 
-        private async Task RollbackAsync(
+        private async Task<DeploymentResult> RollbackAsync(
             OperationSnapshot snapshot,
             CancellationToken token,
             LegacyAdoptionApproval adoptionApproval)
@@ -146,8 +182,18 @@ namespace CodexPortableManager
                 token,
                 true,
                 adoptionApproval);
-            PortableLocalStatus status = await RefreshLocalPathStatusAsync(snapshot, true, false);
-            progress.Report(CreateRollbackCompletion(status.PortableVersion, result));
+            Version restoredVersion;
+            if (result.OldBackupCleanupPending && ApplyPostDeploymentCleanupPresentation(snapshot))
+            {
+                restoredVersion = service.GetPortableVersion(snapshot.InstallRoot);
+            }
+            else
+            {
+                PortableLocalStatus status = await RefreshLocalPathStatusAsync(snapshot, true, false);
+                restoredVersion = status.PortableVersion;
+            }
+            progress.Report(CreateRollbackCompletion(restoredVersion, result));
+            return result;
         }
 
         internal static OperationProgress CreateRollbackCompletion(
@@ -167,6 +213,10 @@ namespace CodexPortableManager
             {
                 detail += " 部分系统集成未完成，可使用“修复启动入口”重试；详情请查看日志。";
             }
+            if (result.OldBackupCleanupPending)
+            {
+                detail += " 旧回滚备份已隔离，独立后台进程将继续清理。";
+            }
             return new OperationProgress(message, 100, detail);
         }
 
@@ -174,11 +224,121 @@ namespace CodexPortableManager
         {
             LegacyAdoptionApproval adoptionApproval;
             if (!TryApproveLegacyAdoption(CaptureOperationSnapshot().InstallRoot, out adoptionApproval)) return;
+            Task<int> cleanupTask = null;
+            OperationSnapshot cleanupSnapshot = null;
             await RunOperationAsync(
-                (snapshot, token) => RollbackAsync(snapshot, token, adoptionApproval),
+                async (snapshot, token) =>
+                {
+                    DeploymentResult result = await RollbackAsync(snapshot, token, adoptionApproval);
+                    if (result.OldBackupCleanupPending)
+                    {
+                        cleanupSnapshot = snapshot;
+                        cleanupTask = service.StartPostDeploymentCleanupAsync(snapshot.InstallRoot);
+                    }
+                    else
+                    {
+                        ObserveStorageMaintenanceAsync(service.StartStorageMaintenanceAsync());
+                    }
+                },
                 false,
                 true,
                 OperationDisplayKind.Rollback);
+            if (cleanupTask != null && cleanupSnapshot != null)
+            {
+                await ObservePostDeploymentCleanupAsync(cleanupSnapshot, cleanupTask);
+            }
+        }
+
+        private bool ApplyPostDeploymentCleanupPresentation(OperationSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.InstallPathRevision != installPathRevision)
+            {
+                return false;
+            }
+
+            Version version = service.GetPortableVersion(snapshot.InstallRoot);
+            if (version == null)
+            {
+                return false;
+            }
+
+            compatibilityOverview = null;
+            compatibilityOverviewPathRevision = -1;
+            compatibilityApplyNeeded = false;
+            compatibilityDraftDirty = false;
+            PortableLocalStatus status = new PortableLocalStatus(
+                version,
+                service.GetPortableApplicationVersion(snapshot.InstallRoot),
+                service.IsPreviousVersionAvailable(snapshot.InstallRoot),
+                null,
+                true,
+                true,
+                false,
+                false,
+                service.IsCachedRollbackVersionAvailable(snapshot.InstallRoot));
+            postDeploymentCleanupActive = true;
+            ApplyLocalPathStatus(snapshot, status, true, false);
+            SetStatusSummary("已更新，后台清理中", "WarningBrush");
+            AppendLog("更新已提交；旧回滚备份和缓存正在由独立后台进程清理，关闭管理器不会中断。");
+            return true;
+        }
+
+        private async Task ObservePostDeploymentCleanupAsync(
+            OperationSnapshot snapshot,
+            Task<int> cleanupTask)
+        {
+            int exitCode;
+            try
+            {
+                exitCode = await cleanupTask;
+            }
+            catch (Exception exception)
+            {
+                postDeploymentCleanupActive = false;
+                AppendLog("无法启动或监视部署后后台清理：" + exception.Message);
+                if (IsLoaded) ApplyUiState();
+                return;
+            }
+
+            postDeploymentCleanupActive = false;
+            if (exitCode != 0)
+            {
+                AppendLog("部署后后台清理尚未完全结束，退出代码：" + exitCode + "；下次启动将继续恢复。");
+                if (IsLoaded) ApplyUiState();
+                return;
+            }
+
+            if (!IsLoaded || snapshot.InstallPathRevision != installPathRevision)
+            {
+                return;
+            }
+
+            try
+            {
+                await RefreshLocalPathStatusAsync(snapshot, false, false);
+                AppendLog("部署后后台清理完成，已刷新便携版状态。");
+            }
+            catch (Exception exception)
+            {
+                AppendLog("部署后后台清理完成，但状态刷新失败：" + exception.Message);
+            }
+            if (IsLoaded) ApplyUiState();
+        }
+
+        private async void ObserveStorageMaintenanceAsync(Task<int> maintenanceTask)
+        {
+            try
+            {
+                int exitCode = await maintenanceTask;
+                if (exitCode != 0)
+                {
+                    AppendLog("后台存储维护尚未完全结束，退出代码：" + exitCode + "；下次启动将继续处理。");
+                }
+            }
+            catch (Exception exception)
+            {
+                AppendLog("无法启动或监视后台存储维护：" + exception.Message);
+            }
         }
 
         private async Task MigrateAsync()
@@ -187,6 +347,8 @@ namespace CodexPortableManager
             if (MessageBox.Show(this, "该操作会先确保便携版可用，再卸载当前用户的官方桌面版（Microsoft Store / MSIX）。继续吗？", "迁移到 Codex 便携版", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             LegacyAdoptionApproval adoptionApproval;
             if (!TryApproveLegacyAdoption(CaptureOperationSnapshot().InstallRoot, out adoptionApproval)) return;
+            Task<int> cleanupTask = null;
+            OperationSnapshot cleanupSnapshot = null;
             await RunOperationAsync(async (snapshot, token) =>
             {
                 InvalidatePathStatus();
@@ -198,6 +360,15 @@ namespace CodexPortableManager
                     token,
                     true,
                     adoptionApproval);
+                if (deploymentResult.OldBackupCleanupPending)
+                {
+                    cleanupSnapshot = snapshot;
+                    cleanupTask = service.StartPostDeploymentCleanupAsync(snapshot.InstallRoot);
+                }
+                else
+                {
+                    ObserveStorageMaintenanceAsync(service.StartStorageMaintenanceAsync());
+                }
                 service.StartPortable(snapshot.InstallRoot);
                 if (!operationController.TryEnterNonCancelablePhase())
                 {
@@ -214,7 +385,11 @@ namespace CodexPortableManager
                 {
                     AppendLog("便携版已完成，但官方桌面版卸载失败：" + FormatOperationFailure(exception));
                     StorePackageState refreshedStoreState = await RefreshStorePackageStateAfterMigrationAsync();
-                    await RefreshLocalPathStatusAsync(snapshot, true, false);
+                    if (!deploymentResult.OldBackupCleanupPending ||
+                        !ApplyPostDeploymentCleanupPresentation(snapshot))
+                    {
+                        await RefreshLocalPathStatusAsync(snapshot, true, false);
+                    }
                     OperationProgress partialCompletion = CreateMigrationStoreUninstallFailure(
                         deploymentResult,
                         exception,
@@ -229,9 +404,17 @@ namespace CodexPortableManager
                     return;
                 }
                 ApplyStorePackagePresentation(StorePackageState.NotInstalled, false);
-                await RefreshLocalPathStatusAsync(snapshot, true, false);
+                if (!deploymentResult.OldBackupCleanupPending ||
+                    !ApplyPostDeploymentCleanupPresentation(snapshot))
+                {
+                    await RefreshLocalPathStatusAsync(snapshot, true, false);
+                }
                 CreateProgress().Report(CreateMigrationCompletion(deploymentResult));
             }, true, true, OperationDisplayKind.Migrate);
+            if (cleanupTask != null && cleanupSnapshot != null)
+            {
+                await ObservePostDeploymentCleanupAsync(cleanupSnapshot, cleanupTask);
+            }
         }
 
         private async Task<StorePackageState> RefreshStorePackageStateAfterMigrationAsync()

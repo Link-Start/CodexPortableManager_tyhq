@@ -421,7 +421,7 @@ namespace CodexPortableManager
                 storeVersionInstalled,
                 !string.IsNullOrWhiteSpace(installPathTextBox.Text) && !installPathInvalid,
                 deploymentCleanupPending,
-                uninstallBackgroundCleanupActive,
+                uninstallBackgroundCleanupActive || postDeploymentCleanupActive,
                 compatibilityOverviewPathRevision == installPathRevision,
                 compatibilityFacts,
                 compatibilityApplyNeeded,

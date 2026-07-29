@@ -74,6 +74,21 @@ namespace CodexPortableManager
                     RecipeId = RecipeId
                 };
             }
+            if (!analysis.HasManagedMarker &&
+                analysis.State == CompatibilityPatchState.Unsupported)
+            {
+                return new CompatibilityFeatureChange
+                {
+                    Succeeded = false,
+                    Changed = false,
+                    Before = CompatibilityPatchState.Official.ToString(),
+                    Desired = CompatibilityPatchState.Official.ToString(),
+                    After = CompatibilityPatchState.Official.ToString(),
+                    Status = CompatibilityFeatureStatus.Unsupported,
+                    Error = analysis.Error ?? "当前版本没有可安全修改的模型白名单入口。",
+                    RecipeId = RecipeId
+                };
+            }
             if (!analysis.HasManagedMarker)
             {
                 return new CompatibilityFeatureChange
@@ -113,64 +128,86 @@ namespace CodexPortableManager
                 (exception == null ? "未知错误。" : exception.Message));
         }
 
-        private static void ValidateAvailableModelsContext(
-            AsarSession session,
-            AsarArchiveEntry candidateEntry)
+        private static SemanticModelAnalysis AnalyzeSemantic(AsarSession session)
         {
-            int peerEntries = 0;
-            int peerOccurrences = 0;
-            int candidateOccurrences = 0;
-            Action<AsarArchiveEntry, byte[]> collect = (entry, data) =>
+            try
             {
-                int count = AsarSession.CountAscii(data, AvailableModelsContext);
-                if (object.ReferenceEquals(entry, candidateEntry))
+                SemanticModelSourceIndex index = BuildSemanticSourceIndex(session);
+                if (index.Sources.Count > 0)
                 {
-                    candidateOccurrences += count;
+                    SemanticModelAnalysis indexed = AnalyzeIndexedSources(session, index);
+                    if (indexed != null) return indexed;
                 }
-                else if (count > 0)
-                {
-                    peerEntries++;
-                    peerOccurrences += count;
-                }
-            };
-            session.ScanEntries(IsModelAssetEntry, collect);
-            bool inlineContext = candidateOccurrences >= 1 &&
-                candidateOccurrences <= 3 &&
-                peerOccurrences == 0;
-            bool separatedContext = candidateOccurrences == 0 &&
-                peerEntries == 1 &&
-                peerOccurrences >= 1 &&
-                peerOccurrences <= 3;
-            if (!inlineContext && !separatedContext &&
-                candidateOccurrences == 0 && peerOccurrences == 0)
-            {
-                // 入口文件可能已经被 bundler 改名；上下文仍以稳定的
-                // available_models 键识别，但不把所有静态资源直接当候选。
-                session.ScanEntries(
-                    IsWebviewJavaScriptEntry,
-                    (entry, data) =>
-                    {
-                        if (object.ReferenceEquals(entry, candidateEntry)) return;
-                        int count = AsarSession.CountAscii(data, AvailableModelsContext);
-                        if (count > 0)
-                        {
-                            peerEntries++;
-                            peerOccurrences += count;
-                        }
-                    });
-                separatedContext = candidateOccurrences == 0 &&
-                    peerEntries == 1 &&
-                    peerOccurrences >= 1 &&
-                    peerOccurrences <= 3;
             }
-            if (!inlineContext && !separatedContext)
+            catch
             {
-                throw new InvalidDataException(
-                    "模型选择器缺少唯一的 available_models 上下文锚点，拒绝修改可能无关的 JavaScript。");
+                // 索引只负责加速；任何不确定性都回到原有全量语义扫描。
             }
+
+            return AnalyzeSemanticExhaustive(session);
         }
 
-        private static SemanticModelAnalysis AnalyzeSemantic(AsarSession session)
+        private static SemanticModelSourceIndex BuildSemanticSourceIndex(AsarSession session)
+        {
+            SemanticModelSourceIndex index = new SemanticModelSourceIndex();
+            session.ScanEntries(
+                IsWebviewJavaScriptEntry,
+                (entry, data) =>
+                {
+                    int markerOccurrences = AsarSession.CountAscii(data, PatchedMarker);
+                    index.MarkerCount += markerOccurrences;
+                    index.AvailableModelsContextOccurrences +=
+                        AsarSession.CountAscii(data, AvailableModelsContext);
+                    if (markerOccurrences == 0 &&
+                        !(ContainsEncodedJavaScriptName(data, "availableModels") &&
+                          ContainsEncodedJavaScriptName(data, "hidden") &&
+                          ContainsEncodedJavaScriptName(data, "model") &&
+                          ContainsEncodedJavaScriptName(data, "has")))
+                    {
+                        return;
+                    }
+
+                    index.Sources.Add(new SemanticModelSource(entry, data));
+                });
+            return index;
+        }
+
+        private static SemanticModelAnalysis AnalyzeIndexedSources(
+            AsarSession session,
+            SemanticModelSourceIndex index)
+        {
+            List<SemanticModelCandidate> candidates = new List<SemanticModelCandidate>();
+            string parseError = null;
+            foreach (SemanticModelSource source in index.Sources)
+            {
+                string text = Encoding.UTF8.GetString(source.Data);
+                try
+                {
+                    JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
+                    candidates.AddRange(FindSemanticCandidates(
+                        source.Entry,
+                        source.Data,
+                        document));
+                }
+                catch (Exception exception)
+                {
+                    parseError = exception.Message;
+                }
+            }
+
+            if (parseError != null || candidates.Count == 0)
+            {
+                return null;
+            }
+            return CompleteSemanticAnalysis(
+                session,
+                candidates,
+                index.MarkerCount,
+                index.AvailableModelsContextOccurrences,
+                parseError);
+        }
+
+        private static SemanticModelAnalysis AnalyzeSemanticExhaustive(AsarSession session)
         {
             List<SemanticModelCandidate> candidates = new List<SemanticModelCandidate>();
             int markerCount = 0;
@@ -219,6 +256,69 @@ namespace CodexPortableManager
                     });
             }
 
+            int availableModelsContextOccurrences = 0;
+            if (candidates.Count == 1)
+            {
+                session.ScanEntries(
+                    IsWebviewJavaScriptEntry,
+                    (entry, data) => availableModelsContextOccurrences +=
+                        AsarSession.CountAscii(data, AvailableModelsContext));
+            }
+
+            return CompleteSemanticAnalysis(
+                session,
+                candidates,
+                markerCount,
+                availableModelsContextOccurrences,
+                parseError);
+        }
+
+        private static SemanticModelAnalysis AnalyzeVerifiedEntry(
+            AsarSession session,
+            string entryPath)
+        {
+            AsarArchiveEntry entry = session.Entries.SingleOrDefault(value =>
+                string.Equals(value.Path, entryPath, StringComparison.Ordinal));
+            if (entry == null)
+            {
+                return SemanticModelAnalysis.Create(
+                    CompatibilityPatchState.Unsupported,
+                    null,
+                    false,
+                    "模型目录语义入口在临时 ASAR 中缺失。");
+            }
+
+            byte[] data = session.GetEntryData(entry);
+            List<SemanticModelCandidate> candidates = new List<SemanticModelCandidate>();
+            string parseError = null;
+            try
+            {
+                string text = Encoding.UTF8.GetString(data);
+                JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
+                candidates.AddRange(FindSemanticCandidates(entry, data, document));
+            }
+            catch (Exception exception)
+            {
+                parseError = exception.Message;
+            }
+
+            IDictionary<string, int> counts = session.CountCurrentPatterns(
+                new[] { PatchedMarker, AvailableModelsContext });
+            return CompleteSemanticAnalysis(
+                session,
+                candidates,
+                counts[PatchedMarker],
+                counts[AvailableModelsContext],
+                parseError);
+        }
+
+        private static SemanticModelAnalysis CompleteSemanticAnalysis(
+            AsarSession session,
+            List<SemanticModelCandidate> candidates,
+            int markerCount,
+            int availableModelsContextOccurrences,
+            string parseError)
+        {
             if (markerCount > 1)
             {
                 return SemanticModelAnalysis.Create(
@@ -247,17 +347,166 @@ namespace CodexPortableManager
                     markerCount > 0,
                     "模型目录语义补丁正文与标记不一致。");
             }
-            try { ValidateAvailableModelsContext(session, candidate.Entry); }
-            catch (Exception exception)
+            if (!candidate.AvailableModelsBindingVerified)
             {
                 return SemanticModelAnalysis.Create(
                     CompatibilityPatchState.Unsupported,
                     candidate,
                     markerCount > 0,
-                    exception.Message);
+                    "模型过滤集合没有绑定到同一函数的 availableModels 参数，拒绝修改可能无关的 JavaScript。");
+            }
+            if (availableModelsContextOccurrences == 0)
+            {
+                return SemanticModelAnalysis.Create(
+                    CompatibilityPatchState.Unsupported,
+                    candidate,
+                    markerCount > 0,
+                    "模型选择器缺少 available_models 配置来源，拒绝修改可能无关的 JavaScript。");
             }
             session.RetainEntryData(candidate.Entry, candidate.Data);
             return SemanticModelAnalysis.Create(state, candidate, markerCount > 0, null);
+        }
+
+        private static bool ContainsEncodedJavaScriptName(byte[] data, string name)
+        {
+            if (data == null || string.IsNullOrEmpty(name)) return false;
+            if (AsarSession.ContainsAscii(data, name)) return true;
+            if (Array.IndexOf(data, (byte)'\\') < 0) return false;
+            byte[] expected = Encoding.ASCII.GetBytes(name);
+            int matched = 0;
+            int offset = 0;
+            while (offset < data.Length)
+            {
+                int start = offset;
+                int decoded;
+                if (!TryReadEncodedAscii(data, ref offset, out decoded))
+                {
+                    offset = start + 1;
+                    matched = 0;
+                    continue;
+                }
+                if (decoded == expected[matched])
+                {
+                    matched++;
+                    if (matched == expected.Length) return true;
+                }
+                else
+                {
+                    matched = decoded == expected[0] ? 1 : 0;
+                }
+            }
+            return false;
+        }
+
+        private static bool TryReadEncodedAscii(
+            byte[] data,
+            ref int offset,
+            out int decoded)
+        {
+            decoded = -1;
+            if (offset >= data.Length) return false;
+            byte current = data[offset++];
+            if (current != (byte)'\\')
+            {
+                decoded = current;
+                return true;
+            }
+            if (offset >= data.Length) return false;
+
+            byte escape = data[offset++];
+            if (escape == (byte)'u')
+            {
+                if (offset < data.Length && data[offset] == (byte)'{')
+                {
+                    offset++;
+                    int value = 0;
+                    int digits = 0;
+                    int digit;
+                    while (offset < data.Length && data[offset] != (byte)'}')
+                    {
+                        if (digits == 6 || !TryGetHexDigit(data[offset++], out digit)) return false;
+                        value = (value << 4) | digit;
+                        digits++;
+                    }
+                    if (digits == 0 || offset >= data.Length || data[offset++] != (byte)'}') return false;
+                    decoded = value;
+                    return true;
+                }
+                return TryReadFixedHex(data, ref offset, 4, out decoded);
+            }
+            if (escape == (byte)'x')
+            {
+                return TryReadFixedHex(data, ref offset, 2, out decoded);
+            }
+            if (escape >= (byte)'0' && escape <= (byte)'7')
+            {
+                int value = escape - (byte)'0';
+                int maximumDigits = escape <= (byte)'3' ? 3 : 2;
+                int digits = 1;
+                while (digits < maximumDigits && offset < data.Length &&
+                    data[offset] >= (byte)'0' && data[offset] <= (byte)'7')
+                {
+                    value = (value << 3) | (data[offset++] - (byte)'0');
+                    digits++;
+                }
+                decoded = value;
+                return true;
+            }
+
+            switch ((char)escape)
+            {
+                case 'b': decoded = '\b'; return true;
+                case 'f': decoded = '\f'; return true;
+                case 'n': decoded = '\n'; return true;
+                case 'r': decoded = '\r'; return true;
+                case 't': decoded = '\t'; return true;
+                case 'v': decoded = 11; return true;
+                case '\r':
+                    if (offset < data.Length && data[offset] == (byte)'\n') offset++;
+                    return false;
+                case '\n': return false;
+            }
+
+            decoded = escape;
+            return true;
+        }
+
+        private static bool TryReadFixedHex(
+            byte[] data,
+            ref int offset,
+            int count,
+            out int value)
+        {
+            value = 0;
+            if (offset + count > data.Length) return false;
+            for (int index = 0; index < count; index++)
+            {
+                int digit;
+                if (!TryGetHexDigit(data[offset++], out digit)) return false;
+                value = (value << 4) | digit;
+            }
+            return true;
+        }
+
+        private static bool TryGetHexDigit(byte value, out int digit)
+        {
+            if (value >= (byte)'0' && value <= (byte)'9')
+            {
+                digit = value - (byte)'0';
+                return true;
+            }
+            if (value >= (byte)'a' && value <= (byte)'f')
+            {
+                digit = value - (byte)'a' + 10;
+                return true;
+            }
+            if (value >= (byte)'A' && value <= (byte)'F')
+            {
+                digit = value - (byte)'A' + 10;
+                return true;
+            }
+            digit = 0;
+            return false;
         }
 
         private static bool IsModelAssetEntry(AsarArchiveEntry entry)
@@ -303,6 +552,9 @@ namespace CodexPortableManager
                         Length = conditional.Range.End - conditional.Range.Start,
                         OfficialExpression = document.Slice(conditional),
                         HiddenExpression = document.Slice(conditional.Alternate),
+                        AvailableModelsBindingVerified = HasAvailableModelsBinding(
+                            record,
+                            conditional),
                         Patched = false
                     });
                     continue;
@@ -332,10 +584,114 @@ namespace CodexPortableManager
                     Length = logical.Range.End - logical.Range.Start + PatchedMarker.Length,
                     OfficialExpression = document.Slice(original),
                     HiddenExpression = document.Slice(logical.Left),
+                    AvailableModelsBindingVerified = HasAvailableModelsBinding(
+                        record,
+                        original),
                     Patched = true
                 });
             }
             return result;
+        }
+
+        private static bool HasAvailableModelsBinding(
+            JavaScriptNodeRecord record,
+            ConditionalExpression conditional)
+        {
+            CallExpression available = conditional == null
+                ? null
+                : conditional.Consequent as CallExpression;
+            string[] member = available == null
+                ? new string[0]
+                : JavaScriptSemanticDocument.GetMemberChain(available.Callee);
+            if (member.Length != 2 ||
+                !string.Equals(member[1], "has", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            JavaScriptNodeRecord scope = record == null ? null : record.Parent;
+            while (scope != null)
+            {
+                if (IsFunctionNode(scope.Node))
+                {
+                    Node[] parameters = GetFunctionParameters(scope.Node).ToArray();
+                    foreach (Node parameter in parameters)
+                    {
+                        ObjectPattern pattern = parameter as ObjectPattern;
+                        if (pattern == null) continue;
+                        Property availableModels = pattern.ChildNodes
+                            .Select(value => value as Property)
+                            .FirstOrDefault(value => value != null && string.Equals(
+                                JavaScriptSemanticDocument.PropertyName(value.Key),
+                                "availableModels",
+                                StringComparison.Ordinal));
+                        if (availableModels == null) continue;
+                        string binding = GetPatternBindingName(availableModels.Value);
+                        if (string.Equals(binding, member[0], StringComparison.Ordinal))
+                        {
+                            return true;
+                        }
+                    }
+                    if (parameters.Any(parameter => PatternBindsName(parameter, member[0])))
+                    {
+                        return false;
+                    }
+                }
+                scope = scope.Parent;
+            }
+            return false;
+        }
+
+        private static bool IsFunctionNode(Node node)
+        {
+            return node is FunctionDeclaration ||
+                node is FunctionExpression ||
+                node is ArrowFunctionExpression;
+        }
+
+        private static IEnumerable<Node> GetFunctionParameters(Node function)
+        {
+            FunctionDeclaration declaration = function as FunctionDeclaration;
+            if (declaration != null) return declaration.Params;
+            FunctionExpression expression = function as FunctionExpression;
+            if (expression != null) return expression.Params;
+            ArrowFunctionExpression arrow = function as ArrowFunctionExpression;
+            return arrow == null ? Enumerable.Empty<Node>() : arrow.Params;
+        }
+
+        private static string GetPatternBindingName(Node value)
+        {
+            string identifier = JavaScriptSemanticDocument.IdentifierName(value);
+            if (identifier != null) return identifier;
+            AssignmentPattern assignment = value as AssignmentPattern;
+            return assignment == null
+                ? null
+                : JavaScriptSemanticDocument.IdentifierName(assignment.Left);
+        }
+
+        private static bool PatternBindsName(Node pattern, string name)
+        {
+            if (pattern == null || string.IsNullOrWhiteSpace(name)) return false;
+            if (string.Equals(
+                JavaScriptSemanticDocument.IdentifierName(pattern),
+                name,
+                StringComparison.Ordinal))
+            {
+                return true;
+            }
+            AssignmentPattern assignment = pattern as AssignmentPattern;
+            if (assignment != null) return PatternBindsName(assignment.Left, name);
+            RestElement rest = pattern as RestElement;
+            if (rest != null) return PatternBindsName(rest.Argument, name);
+            ObjectPattern objectPattern = pattern as ObjectPattern;
+            if (objectPattern != null)
+            {
+                return objectPattern.ChildNodes
+                    .Select(value => value as Property)
+                    .Where(value => value != null)
+                    .Any(value => PatternBindsName(value.Value, name));
+            }
+            return false;
         }
 
         private static bool IsModelFilterConditional(ConditionalExpression conditional)
@@ -395,13 +751,17 @@ namespace CodexPortableManager
             if (analysis.State != expected || analysis.Candidate == null)
             {
                 SafeLog(log, "警告：模型目录语义定位失败，已保留完整 app.asar。原因：" + analysis.Error);
+                string safeOfficialState = analysis.State == CompatibilityPatchState.Unsupported &&
+                    !analysis.HasManagedMarker
+                    ? CompatibilityPatchState.Official.ToString()
+                    : analysis.State.ToString();
                 return new CompatibilityFeatureChange
                 {
                     Succeeded = false,
                     Changed = false,
-                    Before = analysis.State.ToString(),
+                    Before = safeOfficialState,
                     Desired = desired.ToString(),
-                    After = analysis.State.ToString(),
+                    After = safeOfficialState,
                     Status = analysis.State == CompatibilityPatchState.Unsupported
                         ? CompatibilityFeatureStatus.Unsupported
                         : CompatibilityFeatureStatus.Failed,
@@ -433,7 +793,9 @@ namespace CodexPortableManager
                     : "已恢复模型目录的官方语义过滤表达式。",
                 Verify = verified =>
                 {
-                    SemanticModelAnalysis checkedAnalysis = AnalyzeSemantic(verified);
+                    SemanticModelAnalysis checkedAnalysis = AnalyzeVerifiedEntry(
+                        verified,
+                        candidate.Entry.Path);
                     if (checkedAnalysis.State != desired || checkedAnalysis.Error != null)
                     {
                         throw new InvalidDataException("app.asar 模型语义修复完成后验证失败。");
@@ -479,6 +841,26 @@ namespace CodexPortableManager
             }
         }
 
+        private sealed class SemanticModelSourceIndex
+        {
+            internal readonly List<SemanticModelSource> Sources =
+                new List<SemanticModelSource>();
+            internal int MarkerCount;
+            internal int AvailableModelsContextOccurrences;
+        }
+
+        private sealed class SemanticModelSource
+        {
+            internal SemanticModelSource(AsarArchiveEntry entry, byte[] data)
+            {
+                Entry = entry;
+                Data = data;
+            }
+
+            internal AsarArchiveEntry Entry;
+            internal byte[] Data;
+        }
+
         private sealed class SemanticModelCandidate
         {
             internal AsarArchiveEntry Entry;
@@ -487,6 +869,7 @@ namespace CodexPortableManager
             internal int Length;
             internal string OfficialExpression;
             internal string HiddenExpression;
+            internal bool AvailableModelsBindingVerified;
             internal bool Patched;
         }
 

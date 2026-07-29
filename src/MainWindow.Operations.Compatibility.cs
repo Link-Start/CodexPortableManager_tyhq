@@ -213,7 +213,26 @@ namespace CodexPortableManager
                 () => ApplyCompatibilitySettings(snapshot, baselineApproval),
                 token);
             compatibilityDraftDirty = false;
-            await LoadCompatibilityOverviewAsync(snapshot, false, token, true);
+            CompatibilityOverview committedOverview =
+                CreateCommittedCompatibilityOverview(
+                    compatibilityOverviewPathRevision == snapshot.InstallPathRevision
+                        ? compatibilityOverview
+                        : null,
+                    result,
+                    snapshot.Compatibility);
+            if (committedOverview != null && IsLoaded &&
+                snapshot.InstallPathRevision == installPathRevision)
+            {
+                compatibilityOverview = committedOverview;
+                compatibilityOverviewPathRevision = snapshot.InstallPathRevision;
+                InitializeCompatibilitySwitchesFromOverview(snapshot);
+                UpdateCompatibilityPresentation();
+                ApplyUiState();
+            }
+            else
+            {
+                await LoadCompatibilityOverviewAsync(snapshot, false, token, true);
+            }
             string actualStates = result.FeatureResults.Count > 0
                 ? string.Join("；", result.FeatureResults.Select(feature =>
                     feature.DisplayName + "=" + FormatCompatibilityStatus(feature.Status) +
@@ -230,6 +249,86 @@ namespace CodexPortableManager
                         : "可支持的功能已保留；不支持的功能继续使用官方文件并等待适配。")
                     : "实际状态：" + actualStates +
                       "。本次文件变更已回滚，当前选择已保留以便重试。"));
+        }
+
+        internal static CompatibilityOverview CreateCommittedCompatibilityOverview(
+            CompatibilityOverview previous,
+            CompatibilityResult result,
+            CompatibilityOptions options)
+        {
+            if (previous == null || result == null || options == null ||
+                !result.TransactionCommitted)
+            {
+                return null;
+            }
+
+            Dictionary<string, CompatibilityObservedFeature> current = previous.Features
+                .Where(feature => feature != null && !string.IsNullOrWhiteSpace(feature.FeatureId))
+                .GroupBy(feature => feature.FeatureId, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Single(),
+                    StringComparer.OrdinalIgnoreCase);
+            string[] featureIds =
+            {
+                "SandboxCompatibility",
+                "ModelCatalog",
+                "Localization"
+            };
+            if (featureIds.Any(id => !current.ContainsKey(id))) return null;
+
+            Dictionary<string, CompatibilityFeatureResult> applied = result.FeatureResults
+                .Where(feature => feature != null && !string.IsNullOrWhiteSpace(feature.FeatureId))
+                .GroupBy(feature => feature.FeatureId, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Single(),
+                    StringComparer.OrdinalIgnoreCase);
+            List<CompatibilityObservedFeature> merged = new List<CompatibilityObservedFeature>();
+            foreach (string featureId in featureIds)
+            {
+                bool managed = string.Equals(
+                        featureId,
+                        "SandboxCompatibility",
+                        StringComparison.OrdinalIgnoreCase)
+                    ? options.ManageSandboxCompatibility
+                    : string.Equals(
+                        featureId,
+                        "ModelCatalog",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? options.ManageModelCatalog
+                        : options.ManageLocalization;
+                if (!managed)
+                {
+                    merged.Add(current[featureId]);
+                    continue;
+                }
+
+                CompatibilityFeatureResult feature;
+                if (!applied.TryGetValue(featureId, out feature) ||
+                    string.IsNullOrWhiteSpace(feature.After) ||
+                    string.IsNullOrWhiteSpace(feature.RecipeId))
+                {
+                    return null;
+                }
+                merged.Add(new CompatibilityObservedFeature(
+                    featureId,
+                    feature.After,
+                    feature.Status,
+                    feature.Error,
+                    feature.RecipeId,
+                    true));
+            }
+
+            return new CompatibilityOverview(
+                CompatibilityOverviewState.Inspected,
+                "兼容设置事务已提交，当前状态来自提交前后的完整性和语义验证结果。",
+                merged,
+                merged.Where(CompatibilityStatusReader.IsApplied)
+                    .Select(feature => feature.FeatureId),
+                previous.HasOfficialBaseline);
         }
 
         private async Task RepairIntegrationAsync(OperationSnapshot snapshot, CancellationToken token)
@@ -275,6 +374,7 @@ namespace CodexPortableManager
             internal bool Blocked;
             internal bool Unknown;
             internal bool CanApply;
+            internal string Detail;
         }
 
         private void UpdateCompatibilityPresentation()
@@ -495,9 +595,10 @@ namespace CodexPortableManager
             {
                 return new CompatibilityItemPresentation
                 {
-                    Text = "新版不支持",
-                    BrushKey = "DangerBrush",
-                    Blocked = true
+                    Text = "不可用，已关闭",
+                    BrushKey = "MutedBrush",
+                    Blocked = true,
+                    Detail = observed.Error
                 };
             }
             bool retry = observed != null &&
@@ -542,18 +643,13 @@ namespace CodexPortableManager
             if (observed == null) return null;
             if (observed.Status == CompatibilityFeatureStatus.Unsupported)
             {
-                return desired
-                    ? new CompatibilityItemPresentation
-                    {
-                        Text = "新版不支持",
-                        BrushKey = "DangerBrush",
-                        Blocked = true
-                    }
-                    : new CompatibilityItemPresentation
-                    {
-                        Text = "版本不适用",
-                        BrushKey = "MutedBrush"
-                    };
+                return new CompatibilityItemPresentation
+                {
+                    Text = "不可用，已关闭",
+                    BrushKey = "MutedBrush",
+                    Blocked = true,
+                    Detail = observed.Error
+                };
             }
             if (observed.Status == CompatibilityFeatureStatus.Failed &&
                 (string.Equals(observed.After, "Unknown", StringComparison.OrdinalIgnoreCase) ||
@@ -646,6 +742,9 @@ namespace CodexPortableManager
         {
             label.Text = presentation.Text;
             label.Foreground = ResolveBrush(presentation.BrushKey ?? "MutedBrush");
+            label.ToolTip = string.IsNullOrWhiteSpace(presentation.Detail)
+                ? null
+                : presentation.Detail;
         }
 
 

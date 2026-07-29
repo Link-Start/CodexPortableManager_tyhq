@@ -26,6 +26,7 @@ namespace CodexPortableManager
         private bool installPathInvalid;
         private bool deploymentCleanupPending;
         private bool uninstallBackgroundCleanupActive;
+        private bool postDeploymentCleanupActive;
         private bool narrowLogExpanded;
         private int installPathRevision;
         private CompatibilityOverview compatibilityOverview;
@@ -250,7 +251,6 @@ namespace CodexPortableManager
                 : "便携版目标目录：" + initial.InstallRoot);
             AppendLog("缓存目录：" + PortableStorage.CacheRoot);
             AppendLog("本次日志：" + sessionLogPath);
-            System.Threading.Tasks.Task maintenanceTask = System.Threading.Tasks.Task.Run(() => service.MaintainStorage());
             try
             {
                 if (autoRefresh) await RunOperationAsync(
@@ -264,7 +264,20 @@ namespace CodexPortableManager
             {
                 try
                 {
-                    await maintenanceTask;
+                    if (deploymentCleanupPending &&
+                        !string.IsNullOrWhiteSpace(initial.InstallRoot))
+                    {
+                        postDeploymentCleanupActive = true;
+                        ApplyUiState();
+                        System.Threading.Tasks.Task cleanupObservation = ObservePostDeploymentCleanupAsync(
+                            initial,
+                            service.StartPostDeploymentCleanupAsync(initial.InstallRoot));
+                    }
+                    else
+                    {
+                        ObserveStorageMaintenanceAsync(
+                            service.StartStorageMaintenanceAsync());
+                    }
                 }
                 catch (Exception exception)
                 {

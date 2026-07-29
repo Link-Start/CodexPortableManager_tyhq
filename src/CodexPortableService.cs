@@ -62,21 +62,14 @@ namespace CodexPortableManager
             CancellationToken cancellationToken)
         {
             if (progress == null) throw new ArgumentNullException(nameof(progress));
-            try
-            {
-                progress.Report(new OperationProgress("查询微软最新版本", 2, "正在连接微软官方程序包服务。"));
-                PackageMetadata package = await packageResolver.ResolveLatestAsync(cancellationToken).ConfigureAwait(false);
-                return await artifactPipeline.DownloadOfficialPackageAsync(
-                    package,
-                    destinationPath,
-                    progress,
-                    pauseToken,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                RunStorageMaintenanceBestEffort();
-            }
+            progress.Report(new OperationProgress("查询微软最新版本", 2, "正在连接微软官方程序包服务。"));
+            PackageMetadata package = await packageResolver.ResolveLatestAsync(cancellationToken).ConfigureAwait(false);
+            return await artifactPipeline.DownloadOfficialPackageAsync(
+                package,
+                destinationPath,
+                progress,
+                pauseToken,
+                cancellationToken).ConfigureAwait(false);
         }
 
         public Version GetPortableVersion(string installRoot)
@@ -210,7 +203,15 @@ namespace CodexPortableManager
             DeploymentRecoveryResult recovery = new DeploymentRecoveryResult(false, false);
             if (DeploymentJournal.Exists(root) || CompatibilityTransaction.Exists(root))
             {
-                recovery = deploymentEngine.RecoverPendingDeploymentUnderLock(root);
+                DeploymentJournalRecord pendingJournal = DeploymentJournal.Exists(root)
+                    ? DeploymentJournal.Read(root)
+                    : null;
+                bool committedUpdateCleanupOnly = pendingJournal != null &&
+                    pendingJournal.Operation == DeploymentOperationKind.Update &&
+                    pendingJournal.Phase >= DeploymentTransactionPhase.UpdateExternalStateUpdated;
+                recovery = committedUpdateCleanupOnly
+                    ? new DeploymentRecoveryResult(true, false)
+                    : deploymentEngine.RecoverPendingDeploymentUnderLock(root);
             }
             PackageProfile profile;
             string validationError;
@@ -389,7 +390,18 @@ namespace CodexPortableManager
             return UninstallCleanupWorker.StartAsync(installRoot, log);
         }
 
-        internal bool CompletePendingUninstallCleanup(string installRoot)
+        public Task<int> StartPostDeploymentCleanupAsync(string installRoot)
+        {
+            installRoot = DeploymentEngine.ValidateInstallRoot(installRoot);
+            return PostDeploymentCleanupWorker.StartAsync(installRoot, log);
+        }
+
+        public Task<int> StartStorageMaintenanceAsync()
+        {
+            return PostDeploymentCleanupWorker.StartStorageAsync(log);
+        }
+
+        internal bool CompletePendingDeploymentCleanup(string installRoot)
         {
             installRoot = DeploymentEngine.ValidateInstallRoot(installRoot);
             using (OperationFileLock operationLock = OperationFileLock.Acquire(installRoot))
@@ -406,6 +418,11 @@ namespace CodexPortableManager
                 return !DeploymentJournal.Exists(installRoot) &&
                     !ShellIntegration.IsCleanupPendingForRoot(installRoot);
             }
+        }
+
+        internal bool CompletePendingUninstallCleanup(string installRoot)
+        {
+            return CompletePendingDeploymentCleanup(installRoot);
         }
 
         public IReadOnlyList<string> CreateIntegration(string installRoot)
