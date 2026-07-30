@@ -124,6 +124,7 @@ internal static partial class RegressionTestRunner
             "缺少模型选择器上下文的 ASAR 被修改。");
 
         byte[] separatedFilterEntry = Encoding.UTF8.GetBytes(
+            "const state={availableModels:new Set()};" +
             "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
         byte[] separatedQueryEntry = Encoding.UTF8.GetBytes(
             "const source=`available_models`;");
@@ -141,6 +142,11 @@ internal static partial class RegressionTestRunner
             "}}",
             separatedPayload);
         File.WriteAllBytes(asarPath, separatedArchive);
+        string boundedDiagnosis = ModelCatalogCompatibility.DiagnoseBoundedAnalysisForTest(
+            executablePath);
+        Assert(boundedDiagnosis.IndexOf("有界=True", StringComparison.Ordinal) >= 0 &&
+            boundedDiagnosis.IndexOf("语义候选=1", StringComparison.Ordinal) >= 0,
+            "模型快速索引没有把已验证函数限制到有界 AST：" + boundedDiagnosis);
         Assert(ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }),
             "模型入口和上下文 chunk 改名后，唯一语义锚点没有被识别。");
         Assert(ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
@@ -203,6 +209,22 @@ internal static partial class RegressionTestRunner
             ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
             BytesEqual(File.ReadAllBytes(asarPath), escapedBindingArchive),
             "转义后的 availableModels/has/model/hidden 属性没有被快速索引或 AST 正确识别。");
+
+        byte[] arrowFunctionEntry = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function noop({availableModels:n}){return n;}" +
+            "const filter=({availableModels:n},r)=>u?n.has(r.model):!r.hidden;");
+        byte[] arrowFunctionArchive = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/app-initial-arrow.js",
+                arrowFunctionEntry,
+                0) + "}}",
+            arrowFunctionEntry);
+        File.WriteAllBytes(asarPath, arrowFunctionArchive);
+        Assert(ModelCatalogCompatibility.TryConfigure(executablePath, true, delegate { }) &&
+            ModelCatalogCompatibility.TryConfigure(executablePath, false, delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), arrowFunctionArchive),
+            "模型过滤改为箭头函数后没有回退完整 AST 或无法完整往返。");
 
         byte[] mismatchedBindingEntry = Encoding.UTF8.GetBytes(
             "const settings={available_models:[]};" +
@@ -1042,6 +1064,19 @@ internal static partial class RegressionTestRunner
         }
         Assert(BytesEqual(File.ReadAllBytes(asarPath), originalArchive),
             "源路径替换尝试改变了正式 ASAR。");
+    }
+
+    private static void TestCompatibilityAnalysisMemoryPolicy()
+    {
+        long megabyte = 1024L * 1024;
+        Assert(!CompatibilityAnalysisMemory.ShouldReclaim(40 * megabyte, 90 * megabyte),
+            "小规模兼容检查错误触发了全代压缩回收。");
+        Assert(CompatibilityAnalysisMemory.ShouldReclaim(40 * megabyte, 104 * megabyte),
+            "达到 64 MiB 的临时增长后没有安排回收。");
+        Assert(CompatibilityAnalysisMemory.ShouldReclaim(250 * megabyte, 256 * megabyte),
+            "托管堆达到 256 MiB 后没有安排回收。");
+        Assert(!CompatibilityAnalysisMemory.ShouldReclaim(-1, 300 * megabyte),
+            "无效内存采样不应触发回收。");
     }
 
     private static void TestAsarCommitValidatesUnmodifiedEntries()
@@ -2814,10 +2849,75 @@ internal static partial class RegressionTestRunner
                 (System.Windows.Controls.Border)window.FindName("statusSummaryCard");
             System.Windows.Controls.ScrollViewer workspace =
                 (System.Windows.Controls.ScrollViewer)window.FindName("mainScrollViewer");
+            System.Windows.Controls.Border activityPane =
+                (System.Windows.Controls.Border)window.FindName("activityPane");
+            System.Windows.Controls.TextBox logBox =
+                (System.Windows.Controls.TextBox)window.FindName("logBox");
             Assert(summary.Visibility == System.Windows.Visibility.Collapsed,
                 "紧凑高度仍保留重复顶部摘要，压缩了主操作区。");
             Assert(workspace.ActualHeight >= 180,
                 "紧凑窗口主操作区高度不足。实际：" + workspace.ActualHeight);
+            Assert(logBox.TextWrapping == System.Windows.TextWrapping.NoWrap &&
+                logBox.HorizontalScrollBarVisibility ==
+                    System.Windows.Controls.ScrollBarVisibility.Auto,
+                "运行日志仍会随窗口宽度变化重排整段文本。");
+            MethodInfo appendLog = typeof(MainWindow).GetMethod("AppendLog", AnyInstance);
+            Assert(appendLog != null, "无法定位运行日志批量刷新入口。");
+            appendLog.Invoke(window, new object[] { "批量日志测试一" });
+            appendLog.Invoke(window, new object[] { "批量日志测试二" });
+            appendLog.Invoke(window, new object[] { "批量日志测试三" });
+            window.Dispatcher.Invoke(
+                delegate { },
+                System.Windows.Threading.DispatcherPriority.ContextIdle);
+            Assert(logBox.Text.IndexOf("批量日志测试一", StringComparison.Ordinal) >= 0 &&
+                logBox.Text.IndexOf("批量日志测试二", StringComparison.Ordinal) >= 0 &&
+                logBox.Text.IndexOf("批量日志测试三", StringComparison.Ordinal) >= 0,
+                "连续日志没有通过合并调度完整刷新到界面。");
+
+            bool observedSynchronousWideLayout = false;
+            bool observedSynchronousNarrowLayout = false;
+            window.SizeChanged += delegate
+            {
+                if (window.ActualWidth >= 1090)
+                {
+                    observedSynchronousWideLayout =
+                        System.Windows.Controls.Grid.GetColumn(activityPane) == 2;
+                }
+                else if (window.ActualWidth <= 1030)
+                {
+                    observedSynchronousNarrowLayout =
+                        System.Windows.Controls.Grid.GetRow(activityPane) == 1;
+                }
+            };
+
+            window.Width = 1070;
+            window.UpdateLayout();
+            Assert(System.Windows.Controls.Grid.GetRow(activityPane) == 1,
+                "窄布局在断点滞回区内过早切换到宽布局。");
+            window.Width = 1100;
+            window.UpdateLayout();
+            Assert(System.Windows.Controls.Grid.GetColumn(activityPane) == 2,
+                "越过宽布局滞回区后没有在当前布局周期切换到侧栏布局。");
+            window.Width = 1050;
+            window.UpdateLayout();
+            Assert(System.Windows.Controls.Grid.GetColumn(activityPane) == 2,
+                "宽布局在断点滞回区内过早退回窄布局。");
+            window.Width = 1020;
+            window.UpdateLayout();
+            Assert(System.Windows.Controls.Grid.GetRow(activityPane) == 1,
+                "低于宽布局滞回区后没有在当前布局周期退回底部任务布局。");
+            Assert(observedSynchronousWideLayout && observedSynchronousNarrowLayout,
+                "响应式布局没有在 SizeChanged 的同一事件周期完成。");
+            System.Windows.Interop.HwndSource source =
+                System.Windows.PresentationSource.FromVisual(window) as
+                    System.Windows.Interop.HwndSource;
+            System.Windows.Media.SolidColorBrush expectedBackground =
+                window.FindResource("WindowBackgroundBrush") as
+                    System.Windows.Media.SolidColorBrush;
+            Assert(source != null && source.CompositionTarget != null &&
+                expectedBackground != null &&
+                source.CompositionTarget.BackgroundColor == expectedBackground.Color,
+                "窗口合成目标没有使用界面背景色，恢复时可能暴露黑色清屏帧。");
         }
         finally
         {
@@ -2833,6 +2933,33 @@ internal static partial class RegressionTestRunner
             Encoding.UTF8);
         string windowXaml = File.ReadAllText(
             Path.Combine(projectRoot, "src", "MainWindow.xaml"),
+            Encoding.UTF8);
+        string windowCode = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "MainWindow.xaml.cs"),
+            Encoding.UTF8);
+        string statusCode = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "MainWindow.Operations.Status.cs"),
+            Encoding.UTF8);
+        string interactionCode = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "MainWindow.Operations.Interaction.cs"),
+            Encoding.UTF8);
+        string aboutCode = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "MainWindow.About.cs"),
+            Encoding.UTF8);
+        string readme = File.ReadAllText(
+            Path.Combine(projectRoot, "README.md"),
+            Encoding.UTF8);
+        string assemblyInfo = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "AssemblyInfo.cs"),
+            Encoding.UTF8);
+        string appManifest = File.ReadAllText(
+            Path.Combine(projectRoot, "app.manifest"),
+            Encoding.UTF8);
+        string artifactPipeline = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "ArtifactPipeline.cs"),
+            Encoding.UTF8);
+        string packageResolver = File.ReadAllText(
+            Path.Combine(projectRoot, "src", "PackageResolver.cs"),
             Encoding.UTF8);
         string tokensXaml = File.ReadAllText(
             Path.Combine(projectRoot, "src", "DesignTokens.xaml"),
@@ -2858,6 +2985,50 @@ internal static partial class RegressionTestRunner
         Assert(!Regex.IsMatch(windowXaml, "#[0-9A-Fa-f]{6}") &&
             windowXaml.IndexOf("Height=\"32\"", StringComparison.Ordinal) < 0,
             "主窗口仍包含裸颜色或过小的 32px 工具按钮。");
+        Assert(windowXaml.IndexOf("DropShadowEffect", StringComparison.Ordinal) < 0,
+            "主窗口仍包含会在滚动或缩放时触发离屏重绘的阴影。");
+        Assert(windowXaml.IndexOf("TextWrapping=\"NoWrap\"", StringComparison.Ordinal) >= 0 &&
+            windowXaml.IndexOf(
+                "HorizontalScrollBarVisibility=\"Auto\"",
+                StringComparison.Ordinal) >= 0,
+            "运行日志没有保持不换行和横向滚动配置。");
+        Assert(windowCode.IndexOf(
+                "SizeChanged += (sender, args) => UpdateResponsiveLayout()",
+                StringComparison.Ordinal) >= 0 &&
+            windowCode.IndexOf("QueueResponsiveLayoutUpdate", StringComparison.Ordinal) < 0 &&
+            windowCode.IndexOf("WideLayoutHysteresis", StringComparison.Ordinal) >= 0 &&
+            windowCode.IndexOf("DwmSetWindowAttribute", StringComparison.Ordinal) >= 0 &&
+            interactionCode.IndexOf("pendingUiLog", StringComparison.Ordinal) >= 0 &&
+            interactionCode.IndexOf("FlushPendingUiLog", StringComparison.Ordinal) >= 0,
+            "窗口同步布局、原生边框或运行日志刷新保护不完整。");
+        Assert(windowXaml.IndexOf("Text=\"QQ 交流群\"", StringComparison.Ordinal) >= 0 &&
+            windowXaml.IndexOf("Text=\"535990598\"", StringComparison.Ordinal) >= 0 &&
+            windowXaml.IndexOf("copyQqGroupButton", StringComparison.Ordinal) >= 0 &&
+            aboutCode.IndexOf("QqGroupNumber = \"535990598\"", StringComparison.Ordinal) >= 0 &&
+            readme.IndexOf("QQ 群 `535990598`", StringComparison.Ordinal) >= 0 &&
+            windowXaml.IndexOf("1105711986", StringComparison.Ordinal) < 0 &&
+            aboutCode.IndexOf("1105711986", StringComparison.Ordinal) < 0 &&
+            readme.IndexOf("1105711986", StringComparison.Ordinal) < 0,
+            "关于页与 README 的 QQ 群号没有保持一致。");
+        Assert(windowXaml.IndexOf("managerVersionLabel", StringComparison.Ordinal) >= 0 &&
+            windowXaml.IndexOf("复制版本", StringComparison.Ordinal) < 0 &&
+            aboutCode.IndexOf("version.Major", StringComparison.Ordinal) >= 0 &&
+            assemblyInfo.IndexOf("AssemblyVersion(\"1.1.0.0\")", StringComparison.Ordinal) >= 0 &&
+            assemblyInfo.IndexOf("AssemblyFileVersion(\"1.1.0.0\")", StringComparison.Ordinal) >= 0 &&
+            appManifest.IndexOf("version=\"1.1.0.0\"", StringComparison.Ordinal) >= 0 &&
+            artifactPipeline.IndexOf("CodexPortableManager/1.1.0", StringComparison.Ordinal) >= 0 &&
+            packageResolver.IndexOf("CodexPortableManager/1.1.0", StringComparison.Ordinal) >= 0,
+            "1.1.0 版本来源或关于页版本显示没有保持一致。");
+        Assert(windowCode.IndexOf(
+                "EnsureCompatibilityOverviewLoadedAsync",
+                StringComparison.Ordinal) >= 0 &&
+            statusCode.IndexOf(
+                "EnsureCompatibilityOverviewLoadedAsync",
+                StringComparison.Ordinal) >= 0 &&
+            statusCode.IndexOf(
+                "await LoadCompatibilityOverviewAsync",
+                StringComparison.Ordinal) < 0,
+            "启动或普通路径刷新仍会无条件执行高内存兼容语义分析。");
         Assert(windowXaml.IndexOf(
                 "Target=\"{Binding ElementName=installPathTextBox}\"",
                 StringComparison.Ordinal) >= 0 &&

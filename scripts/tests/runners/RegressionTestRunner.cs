@@ -172,6 +172,7 @@ internal static partial class RegressionTestRunner
             RunCase("中文菜单按实际消费者增减并提示未知键", TestLocaleMenuTracksActualConsumerKeys);
             RunCase("语言设置全部关闭时未知 ASAR 无需解析即可跳过", TestLocalizationDisabledUnknownArchive);
             RunCase("ASAR 会话只保留按需读取的目标条目", TestAsarSessionRetainsOnlyTargetEntry);
+            RunCase("兼容语义分析只在大幅临时分配后回收内存", TestCompatibilityAnalysisMemoryPolicy);
             RunCase("ASAR 会话锁定分析时的源文件身份", TestAsarSessionLocksAnalyzedSource);
             RunCase("ASAR 功能暂存事务异常时恢复进入前状态", TestAsarStagingTransactionRollsBackOnFailure);
             RunCase("ASAR 提交校验未修改条目的完整性", TestAsarCommitValidatesUnmodifiedEntries);

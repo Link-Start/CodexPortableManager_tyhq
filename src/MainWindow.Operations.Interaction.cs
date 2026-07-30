@@ -243,23 +243,74 @@ namespace CodexPortableManager
 
         private void AppendLog(string message)
         {
-            if (!Dispatcher.CheckAccess())
+            string uiLine = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " +
+                message + Environment.NewLine;
+            string fileLine = "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") +
+                "] " + message + Environment.NewLine;
+            lock (sessionLogSync)
             {
-                try
+                try { File.AppendAllText(sessionLogPath, fileLine, System.Text.Encoding.UTF8); }
+                catch { }
+            }
+
+            bool scheduleFlush = false;
+            lock (pendingLogSync)
+            {
+                pendingUiLog.Append(uiLine);
+                if (!uiLogFlushPending)
                 {
-                    if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
-                    {
-                        Dispatcher.Invoke(new Action(() => AppendLog(message)));
-                    }
+                    uiLogFlushPending = true;
+                    scheduleFlush = true;
                 }
-                catch (TaskCanceledException) { }
-                catch (InvalidOperationException) { }
+            }
+            if (!scheduleFlush || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            {
                 return;
             }
-            if (logBox == null) return;
-            string line = "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message + Environment.NewLine;
-            logBox.AppendText(line); logBox.ScrollToEnd();
-            try { File.AppendAllText(sessionLogPath, "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] " + message + Environment.NewLine, System.Text.Encoding.UTF8); } catch { }
+
+            try
+            {
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(FlushPendingUiLog));
+            }
+            catch (TaskCanceledException)
+            {
+                ResetPendingUiLogSchedule();
+            }
+            catch (InvalidOperationException)
+            {
+                ResetPendingUiLogSchedule();
+            }
+        }
+
+        private void ResetPendingUiLogSchedule()
+        {
+            lock (pendingLogSync) uiLogFlushPending = false;
+        }
+
+        private void FlushPendingUiLog()
+        {
+            string text;
+            lock (pendingLogSync)
+            {
+                text = pendingUiLog.ToString();
+                pendingUiLog.Clear();
+                uiLogFlushPending = false;
+            }
+            if (logBox == null || text.Length == 0) return;
+
+            logBox.AppendText(text);
+            if (logBox.Text.Length > MaximumUiLogCharacters)
+            {
+                int retainFrom = logBox.Text.Length - RetainedUiLogCharacters;
+                int lineStart = logBox.Text.IndexOf(Environment.NewLine, retainFrom, StringComparison.Ordinal);
+                logBox.Text = lineStart >= 0
+                    ? logBox.Text.Substring(lineStart + Environment.NewLine.Length)
+                    : logBox.Text.Substring(retainFrom);
+                logBox.CaretIndex = logBox.Text.Length;
+            }
+            logBox.ScrollToEnd();
         }
 
         private bool TryApproveLegacyAdoption(

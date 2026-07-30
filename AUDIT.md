@@ -1,12 +1,12 @@
 # Codex Portable Manager 功能保留审计
 
-> 文档定位：当前 `1.0.0.0` 管理器的功能保留、安全边界与发布物审计。用户使用说明见 [README](README.md)，内部模块约束见 [架构说明](docs/ARCHITECTURE.md)。
+> 文档定位：当前 `1.1.0.0` 管理器的功能保留、安全边界与发布物审计。用户使用说明见 [README](README.md)，内部模块约束见 [架构说明](docs/ARCHITECTURE.md)。
 
 ## 审计对象
 
 - 官方包：`OpenAI.Codex` MSIX
 - 最近完成兼容实测的官方清单版本：`26.715.8383.0`（另以 `26.715.4045.0`、`26.715.2305.0`、`26.707.8168.0` 做过签名信任与兼容往返验证）
-- 管理器版本：`1.0.0.0`
+- 管理器版本：`1.1.0.0`
 - 部署形态：普通目录中的 unpackaged Win32 应用
 
 ## 产品范围
@@ -108,5 +108,5 @@
 
 - 当前构建产物为单 EXE，内嵌第三方程序集按固定 SHA-256 校验，Release、开发副本和测试绑定副本可以通过摘要确认来自同一次确定性构建。
 - 当前仓库构建流程尚未执行 Authenticode 代码签名；这不影响管理器对官方 MSIX 的签名验证，但意味着 Windows 无法用发布者证书确认管理器 EXE 本身的来源。
-- `v1.0.0` Release 已发布 `CodexPortableManager.exe` 和 `SHA256SUMS.txt`。正式 EXE 为 1,788,928 字节，SHA-256 为 `A75C0E8FA6DA4875E6DF8B6605B4AEEE82700CFC8712E8E7252D595F48B38B26`，发布标签已通过 GitHub Windows 验证。
+- `v1.1.0` Release 发布物包含 `CodexPortableManager.exe` 和 `SHA256SUMS.txt`。正式 EXE 为 1,820,672 字节，SHA-256 为 `372E0CD62ED063622AB15083E0E912B037D125CE28008213461F01FAC19ED156`；本地 Release 构建、190 项隔离回归、离线 Store/网络、路径自动刷新、PowerShell 语法和真实官方 MSIX 信任验证均已通过，GitHub Windows 验证由发布标签推送触发并作为正式 Release 发布门禁。
 - 后续公开发布仍应优先增加带可信时间戳的 Authenticode 签名，并继续同步发布最终 EXE 的 SHA-256。签名和校验和生成必须位于最终发布文件确定之后，不能复用官方 MSIX 的信任结果替代管理器自身的发布认证。

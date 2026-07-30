@@ -32,6 +32,13 @@ namespace CodexPortableManager
                 return;
             }
 
+            if (EqualsCommand(command, "--model-bounded-diagnose"))
+            {
+                Console.WriteLine(ModelCatalogCompatibility.DiagnoseBoundedAnalysisForTest(
+                    GetArgument(args, 1, string.Empty)));
+                return;
+            }
+
             if (EqualsCommand(command, "--localization-test"))
             {
                 Environment.ExitCode = LocalizationCompatibilityTestRunner.Run(

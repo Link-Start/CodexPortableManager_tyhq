@@ -31,10 +31,14 @@ namespace CodexPortableManager
                 displayState,
                 "compatibility",
                 StringComparison.OrdinalIgnoreCase);
-            if (compatibilityDisplay)
+            bool aboutDisplay = string.Equals(
+                displayState,
+                "about",
+                StringComparison.OrdinalIgnoreCase);
+            if (compatibilityDisplay || aboutDisplay)
             {
                 TabControl tabs = window.FindName("mainTabControl") as TabControl;
-                if (tabs != null) tabs.SelectedIndex = 1;
+                if (tabs != null) tabs.SelectedIndex = aboutDisplay ? 2 : 1;
             }
             window.Show();
             window.UpdateLayout();
@@ -298,9 +302,11 @@ namespace CodexPortableManager
             {
                 ApplyCompatibilityPreview(window);
             }
-            ScrollViewer scrollViewer = compatibilityDisplay
-                ? window.FindName("compatibilityScrollViewer") as ScrollViewer
-                : window.FindName("mainScrollViewer") as ScrollViewer;
+            ScrollViewer scrollViewer = aboutDisplay
+                ? window.FindName("aboutScrollViewer") as ScrollViewer
+                : compatibilityDisplay
+                    ? window.FindName("compatibilityScrollViewer") as ScrollViewer
+                    : window.FindName("mainScrollViewer") as ScrollViewer;
             if (scrollViewer != null && verticalOffset > 0)
             {
                 scrollViewer.ScrollToVerticalOffset(verticalOffset);

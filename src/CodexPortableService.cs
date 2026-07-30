@@ -476,7 +476,9 @@ namespace CodexPortableManager
             installRoot = DeploymentEngine.ValidateInstallRoot(installRoot);
             using (OperationFileLock operationLock = OperationFileLock.Acquire(installRoot))
             {
-                return CompatibilityStatusReader.Read(installRoot, verifyArtifacts);
+                return CompatibilityAnalysisMemory.Run(
+                    () => CompatibilityStatusReader.Read(installRoot, verifyArtifacts),
+                    log);
             }
         }
 
@@ -491,7 +493,9 @@ namespace CodexPortableManager
                 .ConfigureAwait(false))
             {
                 return await Task.Run(
-                    () => CompatibilityStatusReader.Read(installRoot, verifyArtifacts),
+                    () => CompatibilityAnalysisMemory.Run(
+                        () => CompatibilityStatusReader.Read(installRoot, verifyArtifacts),
+                        log),
                     cancellationToken).ConfigureAwait(false);
             }
         }

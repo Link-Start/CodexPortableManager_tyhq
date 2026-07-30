@@ -1,8 +1,12 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace CodexPortableManager
@@ -15,9 +19,17 @@ namespace CodexPortableManager
         private readonly Stopwatch operationStopwatch = new Stopwatch();
         private readonly Stopwatch operationStageStopwatch = new Stopwatch();
         private readonly OperationController operationController = new OperationController();
+        private readonly object pendingLogSync = new object();
+        private readonly object sessionLogSync = new object();
+        private readonly StringBuilder pendingUiLog = new StringBuilder();
         private readonly string sessionLogPath;
         private const double WideLayoutBreakpoint = 1060;
+        private const double WideLayoutHysteresis = 24;
         private const double CompactHeightBreakpoint = 700;
+        private const double CompactHeightHysteresis = 24;
+        private const int MaximumUiLogCharacters = 256 * 1024;
+        private const int RetainedUiLogCharacters = 192 * 1024;
+        private const int DwmWindowAttributeBorderColor = 34;
         private bool statusMatchesCurrentPath;
         private bool portableVersionAvailable;
         private bool previousVersionAvailable;
@@ -28,11 +40,18 @@ namespace CodexPortableManager
         private bool uninstallBackgroundCleanupActive;
         private bool postDeploymentCleanupActive;
         private bool narrowLogExpanded;
+        private bool responsiveLayoutInitialized;
+        private bool appliedWideLayout;
+        private bool appliedCompactHeight;
+        private bool appliedNarrowLogExpanded;
+        private bool scrollEdgeUpdatePending;
+        private bool uiLogFlushPending;
         private int installPathRevision;
         private CompatibilityOverview compatibilityOverview;
         private int compatibilityOverviewPathRevision = -1;
         private bool compatibilityApplyNeeded;
         private bool compatibilityDraftDirty;
+        private bool compatibilityOverviewLoadActive;
         private bool updatingCompatibilitySwitches;
         private string lastProgressLogMessage;
         private int lastProgressLoggedPercent = -10;
@@ -55,6 +74,7 @@ namespace CodexPortableManager
 
             InitializeComponent();
             TryApplyManagerIcon();
+            InitializeAboutPage();
 
             installPathTextBox.Text = managerSettings.InstallRoot;
             sandboxCompatibilityCheckBox.IsChecked = false;
@@ -82,6 +102,7 @@ namespace CodexPortableManager
 
         private void WireEvents(bool autoRefresh, bool initializeOnLoaded)
         {
+            WireAboutEvents();
             browseButton.Click += BrowseButton_Click;
             checkButton.Click += async (sender, args) => await RunOperationAsync(
                 RefreshStatusAsync,
@@ -116,11 +137,20 @@ namespace CodexPortableManager
             openLogButton.Click += OpenLogButton_Click;
             clearLogButton.Click += (sender, args) => logBox.Clear();
             toggleLogButton.Click += ToggleLogButton_Click;
-            mainScrollViewer.ScrollChanged += (sender, args) => UpdateMainScrollEdgeShadows();
-            compatibilityScrollViewer.ScrollChanged += (sender, args) => UpdateMainScrollEdgeShadows();
-            mainTabControl.SelectionChanged += (sender, args) =>
+            mainScrollViewer.ScrollChanged += (sender, args) => QueueMainScrollEdgeUpdate();
+            compatibilityScrollViewer.ScrollChanged += (sender, args) => QueueMainScrollEdgeUpdate();
+            aboutScrollViewer.ScrollChanged += (sender, args) => QueueMainScrollEdgeUpdate();
+            mainTabControl.SelectionChanged += async (sender, args) =>
             {
-                if (ReferenceEquals(args.Source, mainTabControl)) UpdateMainScrollEdgeShadows();
+                if (!ReferenceEquals(args.Source, mainTabControl)) return;
+                QueueMainScrollEdgeUpdate();
+                if (mainTabControl.SelectedIndex == 1 && IsLoaded)
+                {
+                    await EnsureCompatibilityOverviewLoadedAsync(
+                        CaptureOperationSnapshot(),
+                        System.Threading.CancellationToken.None,
+                        true);
+                }
             };
             installPathTextBox.TextChanged += InstallPathTextBox_TextChanged;
             sandboxCompatibilityCheckBox.Checked += SettingsCheckBox_Changed;
@@ -132,6 +162,7 @@ namespace CodexPortableManager
             englishTechnicalParametersCheckBox.Checked += SettingsCheckBox_Changed;
             englishTechnicalParametersCheckBox.Unchecked += SettingsCheckBox_Changed;
             SizeChanged += (sender, args) => UpdateResponsiveLayout();
+            SourceInitialized += (sender, args) => ApplyCompositionBackground();
             Closing += MainWindow_Closing;
             Closed += MainWindow_Closed;
             Loaded += async (sender, args) =>
@@ -153,43 +184,74 @@ namespace CodexPortableManager
         {
             double availableWidth = ActualWidth > 0 ? ActualWidth : Width;
             double availableHeight = ActualHeight > 0 ? ActualHeight : Height;
-            bool wideLayout = availableWidth >= WideLayoutBreakpoint;
-            bool compactHeight = availableHeight < CompactHeightBreakpoint;
-            statusSummaryCard.Visibility = compactHeight
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-            UpdateStatusSummaryLayout(wideLayout);
+            bool wideLayout = responsiveLayoutInitialized
+                ? appliedWideLayout
+                    ? availableWidth >= WideLayoutBreakpoint - WideLayoutHysteresis
+                    : availableWidth >= WideLayoutBreakpoint + WideLayoutHysteresis
+                : availableWidth >= WideLayoutBreakpoint;
+            bool compactHeight = responsiveLayoutInitialized
+                ? appliedCompactHeight
+                    ? availableHeight < CompactHeightBreakpoint + CompactHeightHysteresis
+                    : availableHeight < CompactHeightBreakpoint - CompactHeightHysteresis
+                : availableHeight < CompactHeightBreakpoint;
+            bool widthModeChanged = !responsiveLayoutInitialized || appliedWideLayout != wideLayout;
+            bool heightModeChanged = !responsiveLayoutInitialized || appliedCompactHeight != compactHeight;
+            bool narrowLogModeChanged = !responsiveLayoutInitialized ||
+                appliedNarrowLogExpanded != narrowLogExpanded;
 
-            Grid.SetRow(mainTabControl, 0);
-            Grid.SetColumn(mainTabControl, 0);
-            Grid.SetColumnSpan(mainTabControl, 1);
-
-            if (wideLayout)
+            if (heightModeChanged)
             {
-                workspaceGrid.ColumnDefinitions[1].Width = new GridLength(14);
-                workspaceGrid.ColumnDefinitions[2].Width = new GridLength(360);
-                Grid.SetRow(activityPane, 0);
-                Grid.SetColumn(activityPane, 2);
-                activityPane.Height = double.NaN;
-                activityPane.Margin = new Thickness(0);
-                activityPane.VerticalAlignment = VerticalAlignment.Stretch;
-                logSection.Visibility = Visibility.Visible;
-                toggleLogButton.Visibility = Visibility.Collapsed;
-                UpdateMainScrollEdgeShadows();
-                return;
+                statusSummaryCard.Visibility = compactHeight
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
             }
 
-            workspaceGrid.ColumnDefinitions[1].Width = new GridLength(0);
-            workspaceGrid.ColumnDefinitions[2].Width = new GridLength(0);
-            Grid.SetRow(activityPane, 1);
-            Grid.SetColumn(activityPane, 0);
-            activityPane.Height = narrowLogExpanded ? 250 : double.NaN;
-            activityPane.Margin = new Thickness(0, 12, 4, 0);
-            activityPane.VerticalAlignment = VerticalAlignment.Bottom;
-            logSection.Visibility = narrowLogExpanded ? Visibility.Visible : Visibility.Collapsed;
-            toggleLogButton.Visibility = Visibility.Visible;
-            toggleLogButton.Content = narrowLogExpanded ? "收起日志" : "展开日志";
-            UpdateMainScrollEdgeShadows();
+            if (widthModeChanged)
+            {
+                UpdateStatusSummaryLayout(wideLayout);
+                Grid.SetRow(mainTabControl, 0);
+                Grid.SetColumn(mainTabControl, 0);
+                Grid.SetColumnSpan(mainTabControl, 1);
+
+                if (wideLayout)
+                {
+                    workspaceGrid.ColumnDefinitions[1].Width = new GridLength(14);
+                    workspaceGrid.ColumnDefinitions[2].Width = new GridLength(360);
+                    Grid.SetRow(activityPane, 0);
+                    Grid.SetColumn(activityPane, 2);
+                    activityPane.Height = double.NaN;
+                    activityPane.Margin = new Thickness(0);
+                    activityPane.VerticalAlignment = VerticalAlignment.Stretch;
+                    logSection.Visibility = Visibility.Visible;
+                    toggleLogButton.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    workspaceGrid.ColumnDefinitions[1].Width = new GridLength(0);
+                    workspaceGrid.ColumnDefinitions[2].Width = new GridLength(0);
+                    Grid.SetRow(activityPane, 1);
+                    Grid.SetColumn(activityPane, 0);
+                    activityPane.Margin = new Thickness(0, 12, 4, 0);
+                    activityPane.VerticalAlignment = VerticalAlignment.Bottom;
+                    toggleLogButton.Visibility = Visibility.Visible;
+                }
+            }
+
+            if (!wideLayout && (widthModeChanged || narrowLogModeChanged))
+            {
+                activityPane.Height = narrowLogExpanded ? 250 : double.NaN;
+                logSection.Visibility = narrowLogExpanded ? Visibility.Visible : Visibility.Collapsed;
+                toggleLogButton.Content = narrowLogExpanded ? "收起日志" : "展开日志";
+            }
+
+            responsiveLayoutInitialized = true;
+            appliedWideLayout = wideLayout;
+            appliedCompactHeight = compactHeight;
+            appliedNarrowLogExpanded = narrowLogExpanded;
+            if (widthModeChanged || heightModeChanged || narrowLogModeChanged)
+            {
+                QueueMainScrollEdgeUpdate();
+            }
         }
 
         private void UpdateStatusSummaryLayout(bool wideLayout)
@@ -225,22 +287,83 @@ namespace CodexPortableManager
             statusNarrowRowSeparator.Visibility = wideLayout ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private void UpdateMainScrollEdgeShadows()
+        private void UpdateMainScrollEdges()
         {
             if (mainScrollViewer == null || mainScrollTopEdge == null || mainScrollBottomEdge == null) return;
 
-            ScrollViewer activeScrollViewer = mainTabControl != null && mainTabControl.SelectedIndex == 1
-                ? compatibilityScrollViewer
-                : mainScrollViewer;
+            ScrollViewer activeScrollViewer = mainScrollViewer;
+            if (mainTabControl != null && mainTabControl.SelectedIndex == 1)
+            {
+                activeScrollViewer = compatibilityScrollViewer;
+            }
+            else if (mainTabControl != null && mainTabControl.SelectedIndex == 2)
+            {
+                activeScrollViewer = aboutScrollViewer;
+            }
             if (activeScrollViewer == null) return;
             const double threshold = 0.5;
             bool hasScrollableContent = activeScrollViewer.ScrollableHeight > threshold;
             bool hasContentAbove = hasScrollableContent && activeScrollViewer.VerticalOffset > threshold;
             bool hasContentBelow = hasScrollableContent &&
                 activeScrollViewer.VerticalOffset < activeScrollViewer.ScrollableHeight - threshold;
-            mainScrollTopEdge.Visibility = hasContentAbove ? Visibility.Visible : Visibility.Collapsed;
-            mainScrollBottomEdge.Visibility = hasContentBelow ? Visibility.Visible : Visibility.Collapsed;
+            Visibility topVisibility = hasContentAbove ? Visibility.Visible : Visibility.Collapsed;
+            Visibility bottomVisibility = hasContentBelow ? Visibility.Visible : Visibility.Collapsed;
+            if (mainScrollTopEdge.Visibility != topVisibility)
+            {
+                mainScrollTopEdge.Visibility = topVisibility;
+            }
+            if (mainScrollBottomEdge.Visibility != bottomVisibility)
+            {
+                mainScrollBottomEdge.Visibility = bottomVisibility;
+            }
         }
+
+        private void QueueMainScrollEdgeUpdate()
+        {
+            if (scrollEdgeUpdatePending || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            {
+                return;
+            }
+
+            scrollEdgeUpdatePending = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+            {
+                scrollEdgeUpdatePending = false;
+                UpdateMainScrollEdges();
+            }));
+        }
+
+        private void ApplyCompositionBackground()
+        {
+            try
+            {
+                HwndSource source = PresentationSource.FromVisual(this) as HwndSource;
+                SolidColorBrush background = TryFindResource("WindowBackgroundBrush") as SolidColorBrush;
+                if (source != null && source.CompositionTarget != null && background != null)
+                {
+                    source.CompositionTarget.BackgroundColor = background.Color;
+                    uint borderColor = background.Color.R |
+                        ((uint)background.Color.G << 8) |
+                        ((uint)background.Color.B << 16);
+                    DwmSetWindowAttribute(
+                        source.Handle,
+                        DwmWindowAttributeBorderColor,
+                        ref borderColor,
+                        Marshal.SizeOf(typeof(uint)));
+                }
+            }
+            catch
+            {
+                // 合成背景和原生边框只是窗口切换时的视觉保护，不应阻止管理器启动。
+            }
+        }
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(
+            IntPtr windowHandle,
+            int attribute,
+            ref uint attributeValue,
+            int attributeSize);
 
         private async System.Threading.Tasks.Task InitializeWindowAsync(bool autoRefresh)
         {

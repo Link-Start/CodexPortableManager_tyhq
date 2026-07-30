@@ -174,7 +174,8 @@ try {
         -RedirectStandardOutput $standardOutputPath `
         -RedirectStandardError $standardErrorPath
 
-    $readyDeadline = [DateTime]::UtcNow.AddMinutes(3)
+    # 大型官方包的首次摘要、签名与 Defender 扫描可能超过三分钟。
+    $readyDeadline = [DateTime]::UtcNow.AddMinutes(10)
     while (-not (Test-Path -LiteralPath $readyPath) -and -not $harnessProcess.HasExited) {
         if ([DateTime]::UtcNow -ge $readyDeadline) {
             throw "等待 MSIX junction 换向测试进入持锁状态超时。"
@@ -189,7 +190,7 @@ try {
     [IO.Directory]::Move($packageJunction, $heldPackageJunction)
     New-Item -ItemType Junction -Path $packageJunction -Target $swappedPackageDirectory | Out-Null
     [IO.File]::WriteAllText($continuePath, "continue", [Text.Encoding]::UTF8)
-    if (-not $harnessProcess.WaitForExit(180000)) {
+    if (-not $harnessProcess.WaitForExit(600000)) {
         try { $harnessProcess.Kill() } catch { }
         throw "MSIX 可信测试在 junction 换向后没有按时退出。"
     }

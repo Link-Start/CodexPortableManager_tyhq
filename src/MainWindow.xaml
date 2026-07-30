@@ -25,14 +25,6 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
             <Setter Property="Margin" Value="{StaticResource CardSpacing}" />
-            <Setter Property="Effect">
-                <Setter.Value>
-                    <DropShadowEffect Color="{StaticResource ShadowColor}"
-                                      BlurRadius="12"
-                                      ShadowDepth="1"
-                                      Opacity="0.045" />
-                </Setter.Value>
-            </Setter>
         </Style>
 
         <Style x:Key="SectionTitleStyle" TargetType="{x:Type TextBlock}">
@@ -148,7 +140,7 @@
                             <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
                                 <UniformGrid x:Name="HeaderPanel"
                                              Rows="1"
-                                             Columns="2"
+                                             Columns="3"
                                              IsItemsHost="True"
                                              KeyboardNavigation.TabIndex="1" />
                             </Border>
@@ -187,18 +179,9 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Chrome" Property="Opacity" Value="0.92" />
-                                <Setter TargetName="Chrome" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect Color="{StaticResource ShadowColor}"
-                                                          BlurRadius="10"
-                                                          ShadowDepth="1"
-                                                          Opacity="0.11" />
-                                    </Setter.Value>
-                                </Setter>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Chrome" Property="Opacity" Value="0.82" />
-                                <Setter TargetName="Chrome" Property="Effect" Value="{x:Null}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource PrimaryStrongBrush}" />
@@ -207,7 +190,6 @@
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Chrome" Property="Background" Value="{StaticResource DividerBrush}" />
                                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource ControlBorderBrush}" />
-                                <Setter TargetName="Chrome" Property="Effect" Value="{x:Null}" />
                                 <Setter Property="Foreground" Value="{StaticResource DisabledTextBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -279,15 +261,7 @@
                                          Height="18"
                                          Margin="2"
                                          HorizontalAlignment="Left"
-                                         Fill="{StaticResource SurfaceBrush}">
-                                    <Ellipse.Effect>
-                                        <DropShadowEffect Color="{StaticResource ShadowColor}"
-                                                          Direction="270"
-                                                          ShadowDepth="1"
-                                                          BlurRadius="3"
-                                                          Opacity="0.22" />
-                                    </Ellipse.Effect>
-                                </Ellipse>
+                                         Fill="{StaticResource SurfaceBrush}" />
                             </Border>
                         </Grid>
                         <ControlTemplate.Triggers>
@@ -721,6 +695,198 @@
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
+
+                <TabItem Header="关于"
+                         Style="{StaticResource WorkspaceTabItemStyle}"
+                         AutomationProperties.Name="关于">
+                    <ScrollViewer x:Name="aboutScrollViewer"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  PanningMode="VerticalOnly"
+                                  CanContentScroll="False">
+                        <StackPanel Margin="0,0,4,0">
+                            <Border Style="{StaticResource CardStyle}" Padding="24,22" Margin="0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="68"
+                                            Height="68"
+                                            CornerRadius="8"
+                                            Background="{StaticResource PrimaryFocusBrush}"
+                                            VerticalAlignment="Top">
+                                        <Image x:Name="managerIconImage"
+                                               Width="48"
+                                               Height="48"
+                                               Stretch="Uniform"
+                                               AutomationProperties.Name="Codex 便携版管理器图标" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="18,0,20,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Codex 便携版管理器"
+                                                   FontSize="{StaticResource FontSizeTaskTitle}"
+                                                   FontWeight="Bold"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="创建、更新并维护普通目录中的 Codex 便携版"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   Margin="0,6,0,0" />
+                                        <TextBlock x:Name="managerVersionLabel"
+                                                   Text="版本 1.1.0"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="{StaticResource FontSizeCaption}"
+                                                   Margin="0,4,0,0"
+                                                   AutomationProperties.Name="管理器版本" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}" Padding="22,18">
+                                <StackPanel>
+                                    <TextBlock Text="项目与支持" Style="{StaticResource SectionTitleStyle}" />
+                                    <TextBlock Text="查看源代码、发行版本与使用说明，或提交可复现的问题反馈。"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="0,7,0,0" />
+                                    <local:ResponsiveButtonPanel MinimumItemWidth="190"
+                                                                 Spacing="14"
+                                                                 RowSpacing="14"
+                                                                 Margin="0,15,0,0">
+                                        <Grid MinHeight="78">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Button x:Name="openProjectButton"
+                                                    Content="查看项目主页"
+                                                    Style="{StaticResource PrimaryButtonStyle}"
+                                                    AutomationProperties.HelpText="在浏览器中打开 GitHub 项目主页" />
+                                            <TextBlock Grid.Row="1"
+                                                       Text="源代码、文档和最新发行版本"
+                                                       Style="{StaticResource ActionDescriptionStyle}" />
+                                        </Grid>
+                                        <Grid MinHeight="78">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Button x:Name="reportIssueButton"
+                                                    Content="反馈问题"
+                                                    Style="{StaticResource SecondaryButtonStyle}"
+                                                    AutomationProperties.HelpText="在浏览器中打开 GitHub 问题反馈页面" />
+                                            <TextBlock Grid.Row="1"
+                                                       Text="提交缺陷、兼容问题或改进建议"
+                                                       Style="{StaticResource ActionDescriptionStyle}" />
+                                        </Grid>
+                                    </local:ResponsiveButtonPanel>
+                                    <Border Height="1"
+                                            Background="{StaticResource DividerBrush}"
+                                            Margin="0,14,0,0" />
+                                    <Grid Margin="0,13,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="112" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="QQ 交流群"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="{StaticResource FontSizeBodyCompact}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="535990598"
+                                                       Foreground="{StaticResource TextBrush}"
+                                                       FontSize="{StaticResource FontSizeLabel}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="使用交流与问题讨论"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Margin="0,2,12,0" />
+                                        </StackPanel>
+                                        <Button x:Name="copyQqGroupButton"
+                                                Grid.Column="2"
+                                                Content="复制"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                MinWidth="72"
+                                                Height="{StaticResource ControlHeightCompact}"
+                                                AutomationProperties.Name="复制 QQ 群号 535990598"
+                                                AutomationProperties.HelpText="复制 Codex Portable Manager QQ 交流群号" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}" Padding="22,18">
+                                <StackPanel>
+                                    <TextBlock Text="开源许可" Style="{StaticResource SectionTitleStyle}" />
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="本项目"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="{StaticResource FontSizeBodyCompact}"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="MIT License"
+                                                       Foreground="{StaticResource TextBrush}"
+                                                       FontSize="{StaticResource FontSizeLabel}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="项目维护：tyhq"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Margin="0,3,12,0" />
+                                        </StackPanel>
+                                        <Button x:Name="openLicenseButton"
+                                                Grid.Column="2"
+                                                Content="查看许可证"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                MinWidth="104"
+                                                Height="{StaticResource ControlHeightCompact}"
+                                                AutomationProperties.HelpText="在浏览器中查看 MIT 许可证全文" />
+                                    </Grid>
+                                    <Border Height="1" Background="{StaticResource DividerBrush}" Margin="0,14" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="第三方组件"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="{StaticResource FontSizeBodyCompact}"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="Esprima 与 Microsoft .NET 兼容程序集"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   FontSize="{StaticResource FontSizeLabel}"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,12,0"
+                                                   VerticalAlignment="Center" />
+                                        <Button x:Name="openThirdPartyNoticesButton"
+                                                Grid.Column="2"
+                                                Content="第三方声明"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                MinWidth="104"
+                                                Height="{StaticResource ControlHeightCompact}"
+                                                AutomationProperties.HelpText="在浏览器中查看第三方组件许可声明" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="Codex Portable Manager 是社区开源项目，与 Microsoft、OpenAI 无隶属关系。相关产品与名称归各自权利人所有。"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       TextAlignment="Center"
+                                       Margin="20,2,20,8" />
+                            <TextBlock x:Name="aboutActionStatusLabel"
+                                       Foreground="{StaticResource SuccessBrush}"
+                                       FontSize="{StaticResource FontSizeBodyCompact}"
+                                       TextAlignment="Center"
+                                       MinHeight="19"
+                                       Margin="20,0,20,4"
+                                       AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
             </TabControl>
 
             <Border x:Name="mainScrollTopEdge"
@@ -732,16 +898,7 @@
                     Background="{StaticResource ScrollEdgeBrush}"
                     IsHitTestVisible="False"
                     Visibility="Collapsed"
-                    Panel.ZIndex="5">
-                <Border.Effect>
-                    <DropShadowEffect x:Name="mainScrollTopShadowEffect"
-                                      Color="{StaticResource ScrollShadowColor}"
-                                      Direction="270"
-                                      ShadowDepth="1"
-                                      BlurRadius="4"
-                                      Opacity="0.16" />
-                </Border.Effect>
-            </Border>
+                    Panel.ZIndex="5" />
 
             <Border x:Name="mainScrollBottomEdge"
                     Grid.Row="0"
@@ -752,16 +909,7 @@
                     Background="{StaticResource ScrollEdgeBrush}"
                     IsHitTestVisible="False"
                     Visibility="Collapsed"
-                    Panel.ZIndex="5">
-                <Border.Effect>
-                    <DropShadowEffect x:Name="mainScrollBottomShadowEffect"
-                                      Color="{StaticResource ScrollShadowColor}"
-                                      Direction="90"
-                                      ShadowDepth="1"
-                                      BlurRadius="4"
-                                      Opacity="0.16" />
-                </Border.Effect>
-            </Border>
+                    Panel.ZIndex="5" />
 
             <Border x:Name="activityPane"
                     Grid.Row="0"
@@ -839,8 +987,8 @@
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
                                      VerticalScrollBarVisibility="Auto"
-                                     HorizontalScrollBarVisibility="Disabled"
-                                     TextWrapping="Wrap"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     TextWrapping="NoWrap"
                                      Background="Transparent"
                                      Foreground="{StaticResource DividerBrush}"
                                      BorderThickness="0"
@@ -859,14 +1007,6 @@
                 VerticalAlignment="Top"
                 Background="{StaticResource WindowEdgeBrush}"
                 IsHitTestVisible="False"
-                Panel.ZIndex="10">
-            <Border.Effect>
-                <DropShadowEffect Color="{StaticResource ShadowColor}"
-                                  Direction="270"
-                                  ShadowDepth="3"
-                                  BlurRadius="9"
-                                  Opacity="0.16" />
-            </Border.Effect>
-        </Border>
+                Panel.ZIndex="10" />
     </Grid>
 </Window>

@@ -9,6 +9,6 @@ using System.Runtime.CompilerServices;
 [assembly: AssemblyCopyright("Copyright (c) 2026 tyhq")]
 [assembly: ComVisible(false)]
 [assembly: Guid("4f9fc2f7-8f43-4f5e-9cf7-569c2c52b377")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 [assembly: InternalsVisibleTo("CodexPortableManager.Tests")]

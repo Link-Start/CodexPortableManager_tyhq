@@ -95,6 +95,43 @@ namespace CodexPortableManager
             ApplyUiState();
         }
 
+        private async Task EnsureCompatibilityOverviewLoadedAsync(
+            OperationSnapshot snapshot,
+            CancellationToken token,
+            bool allowWhileBusy)
+        {
+            if (snapshot == null || mainTabControl == null ||
+                mainTabControl.SelectedIndex != 1 || compatibilityOverviewLoadActive ||
+                compatibilityOverviewPathRevision == snapshot.InstallPathRevision &&
+                compatibilityOverview != null)
+            {
+                return;
+            }
+
+            compatibilityOverviewLoadActive = true;
+            try
+            {
+                await LoadCompatibilityOverviewAsync(
+                    snapshot,
+                    false,
+                    token,
+                    allowWhileBusy);
+            }
+            finally
+            {
+                compatibilityOverviewLoadActive = false;
+            }
+
+            if (IsLoaded && mainTabControl.SelectedIndex == 1 &&
+                snapshot.InstallPathRevision != installPathRevision)
+            {
+                await EnsureCompatibilityOverviewLoadedAsync(
+                    CaptureOperationSnapshot(),
+                    CancellationToken.None,
+                    allowWhileBusy);
+            }
+        }
+
         private void InitializeCompatibilitySwitchesFromOverview(OperationSnapshot snapshot)
         {
             if (snapshot == null ||

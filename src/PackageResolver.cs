@@ -25,7 +25,7 @@ namespace CodexPortableManager
             {
                 Timeout = Timeout.InfiniteTimeSpan
             };
-            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodexPortableManager/1.0.0");
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodexPortableManager/1.1.0");
             packageSource = new CodexMicrosoftStoreSource(new MicrosoftStoreProtocolClient(httpClient));
         }
 

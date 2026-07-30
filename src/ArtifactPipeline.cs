@@ -118,7 +118,7 @@ namespace CodexPortableManager
             {
                 Timeout = System.Threading.Timeout.InfiniteTimeSpan
             };
-            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodexPortableManager/1.0.0");
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodexPortableManager/1.1.0");
         }
 
         public async Task<string> DownloadOfficialPackageAsync(

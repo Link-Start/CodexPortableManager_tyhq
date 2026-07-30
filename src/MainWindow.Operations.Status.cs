@@ -127,7 +127,7 @@ namespace CodexPortableManager
                 }
                 else
                 {
-                    await LoadCompatibilityOverviewAsync(snapshot, false, token, true);
+                    await EnsureCompatibilityOverviewLoadedAsync(snapshot, token, true);
                 }
                 status = await statusTask;
             }
@@ -389,7 +389,10 @@ namespace CodexPortableManager
             }
             else
             {
-                await LoadCompatibilityOverviewAsync(snapshot, false, CancellationToken.None, allowWhileBusy);
+                await EnsureCompatibilityOverviewLoadedAsync(
+                    snapshot,
+                    CancellationToken.None,
+                    allowWhileBusy);
             }
             return status;
         }

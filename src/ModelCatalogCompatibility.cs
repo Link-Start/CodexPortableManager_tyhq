@@ -7,11 +7,15 @@ using Esprima.Ast;
 
 namespace CodexPortableManager
 {
-    internal static class ModelCatalogCompatibility
+    internal static partial class ModelCatalogCompatibility
     {
         internal const string RecipeId = "model-catalog.available-models";
         private const string AvailableModelsContext = "available_models";
         internal const string PatchedMarker = "/*codex-portable-manager:model-catalog-semantic*/";
+        private const int MaximumBoundedOccurrences = 64;
+        private const int MaximumFunctionLookBehind = 128 * 1024;
+        private const int MaximumFunctionFragmentLength = 256 * 1024;
+        private const int PotentialCandidateRadius = 2048;
 
         internal static IEnumerable<string> ManagedMarkers
         {
@@ -183,11 +187,10 @@ namespace CodexPortableManager
                 string text = Encoding.UTF8.GetString(source.Data);
                 try
                 {
-                    JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
-                    candidates.AddRange(FindSemanticCandidates(
+                    candidates.AddRange(FindSemanticCandidatesInSource(
                         source.Entry,
                         source.Data,
-                        document));
+                        text));
                 }
                 catch (Exception exception)
                 {
@@ -220,8 +223,7 @@ namespace CodexPortableManager
                     markerCount += Count(text, PatchedMarker);
                     try
                     {
-                        JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
-                        candidates.AddRange(FindSemanticCandidates(entry, data, document));
+                        candidates.AddRange(FindSemanticCandidatesInSource(entry, data, text));
                     }
                     catch (Exception exception)
                     {
@@ -246,8 +248,7 @@ namespace CodexPortableManager
                         }
                         try
                         {
-                            JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
-                            candidates.AddRange(FindSemanticCandidates(entry, data, document));
+                            candidates.AddRange(FindSemanticCandidatesInSource(entry, data, text));
                         }
                         catch (Exception exception)
                         {
@@ -294,8 +295,7 @@ namespace CodexPortableManager
             try
             {
                 string text = Encoding.UTF8.GetString(data);
-                JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
-                candidates.AddRange(FindSemanticCandidates(entry, data, document));
+                candidates.AddRange(FindSemanticCandidatesInSource(entry, data, text));
             }
             catch (Exception exception)
             {
@@ -369,12 +369,20 @@ namespace CodexPortableManager
 
         private static bool ContainsEncodedJavaScriptName(byte[] data, string name)
         {
-            if (data == null || string.IsNullOrEmpty(name)) return false;
-            if (AsarSession.ContainsAscii(data, name)) return true;
-            if (Array.IndexOf(data, (byte)'\\') < 0) return false;
+            return CountEncodedJavaScriptName(data, name) > 0;
+        }
+
+        private static int CountEncodedJavaScriptName(byte[] data, string name)
+        {
+            if (data == null || string.IsNullOrEmpty(name)) return 0;
+            if (Array.IndexOf(data, (byte)'\\') < 0)
+            {
+                return AsarSession.CountAscii(data, name);
+            }
             byte[] expected = Encoding.ASCII.GetBytes(name);
             int matched = 0;
             int offset = 0;
+            int count = 0;
             while (offset < data.Length)
             {
                 int start = offset;
@@ -388,14 +396,18 @@ namespace CodexPortableManager
                 if (decoded == expected[matched])
                 {
                     matched++;
-                    if (matched == expected.Length) return true;
+                    if (matched == expected.Length)
+                    {
+                        count++;
+                        matched = 0;
+                    }
                 }
                 else
                 {
                     matched = decoded == expected[0] ? 1 : 0;
                 }
             }
-            return false;
+            return count;
         }
 
         private static bool TryReadEncodedAscii(
@@ -524,10 +536,337 @@ namespace CodexPortableManager
                 entry.Path.EndsWith(".js", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static IEnumerable<SemanticModelCandidate> FindSemanticCandidatesInSource(
+            AsarArchiveEntry entry,
+            byte[] data,
+            string text)
+        {
+            List<SemanticModelCandidate> bounded;
+            if (TryFindBoundedSemanticCandidates(entry, data, text, out bounded))
+            {
+                return bounded;
+            }
+
+            JavaScriptSemanticDocument document = JavaScriptSemanticDocument.Parse(text);
+            return FindSemanticCandidates(entry, data, document, 0);
+        }
+
+        private static bool TryFindBoundedSemanticCandidates(
+            AsarArchiveEntry entry,
+            byte[] data,
+            string text,
+            out List<SemanticModelCandidate> candidates)
+        {
+            string reason;
+            return TryFindBoundedSemanticCandidates(
+                entry,
+                data,
+                text,
+                out candidates,
+                out reason);
+        }
+
+        private static bool TryFindBoundedSemanticCandidates(
+            AsarArchiveEntry entry,
+            byte[] data,
+            string text,
+            out List<SemanticModelCandidate> candidates,
+            out string reason)
+        {
+            candidates = new List<SemanticModelCandidate>();
+            List<int> occurrences = FindLiteralOccurrences(text, "availableModels");
+            if (occurrences.Count == 0 || occurrences.Count > MaximumBoundedOccurrences)
+            {
+                reason = "availableModels 字面量数量不在安全范围内：" + occurrences.Count;
+                return false;
+            }
+            if (!HasOnlyLiteralSpellings(data, text, "availableModels"))
+            {
+                reason = "检测到 availableModels 转义写法";
+                return false;
+            }
+
+            Dictionary<string, BoundedSemanticDocument> documents =
+                new Dictionary<string, BoundedSemanticDocument>(StringComparer.Ordinal);
+            List<int> uncertainOccurrences = new List<int>();
+            foreach (int occurrence in occurrences)
+            {
+                BoundedSemanticDocument bounded;
+                if (!TryParseBoundedFunction(text, occurrence, out bounded))
+                {
+                    if (IsPotentialUnboundedCandidate(text, occurrence))
+                    {
+                        uncertainOccurrences.Add(occurrence);
+                    }
+                    continue;
+                }
+                string key = bounded.Offset.ToString() + ":" + bounded.Length.ToString();
+                if (!documents.ContainsKey(key)) documents.Add(key, bounded);
+            }
+
+            if (documents.Count == 0)
+            {
+                if (uncertainOccurrences.Count == 0)
+                {
+                    reason = "未发现具有模型过滤特征的函数片段";
+                    return true;
+                }
+                reason = "没有形成可验证的函数片段";
+                return false;
+            }
+
+            foreach (BoundedSemanticDocument bounded in documents.Values)
+            {
+                candidates.AddRange(FindSemanticCandidates(
+                    entry,
+                    data,
+                    bounded.Document,
+                    bounded.Offset));
+            }
+            foreach (int occurrence in uncertainOccurrences)
+            {
+                bool coveredByVerifiedFragment = documents.Values.Any(document =>
+                    occurrence >= document.Offset &&
+                    occurrence < document.Offset + document.Length);
+                if (!coveredByVerifiedFragment)
+                {
+                    reason = "存在已验证函数之外的潜在候选，位置=" + occurrence;
+                    return false;
+                }
+            }
+            reason = "有界函数片段=" + documents.Count + "，语义候选=" + candidates.Count;
+            return true;
+        }
+
+        private static bool HasOnlyLiteralSpellings(
+            byte[] data,
+            string text,
+            string value)
+        {
+            return CountEncodedJavaScriptName(data, value) ==
+                FindLiteralOccurrences(text, value).Count;
+        }
+
+        private static bool IsPotentialUnboundedCandidate(string text, int occurrence)
+        {
+            if (IsNewExpressionPropertyValue(text, occurrence, "availableModels"))
+            {
+                return false;
+            }
+
+            int start = Math.Max(0, occurrence - PotentialCandidateRadius);
+            int end = Math.Min(text.Length, occurrence + PotentialCandidateRadius);
+            string vicinity = text.Substring(start, end - start);
+            byte[] bytes = Encoding.UTF8.GetBytes(vicinity);
+            return ContainsEncodedJavaScriptName(bytes, "hidden") &&
+                ContainsEncodedJavaScriptName(bytes, "model") &&
+                ContainsEncodedJavaScriptName(bytes, "has");
+        }
+
+        private static bool IsNewExpressionPropertyValue(
+            string text,
+            int occurrence,
+            string propertyName)
+        {
+            int offset = occurrence + propertyName.Length;
+            while (offset < text.Length && char.IsWhiteSpace(text[offset])) offset++;
+            if (offset >= text.Length || text[offset] != ':') return false;
+            offset++;
+            while (offset < text.Length && char.IsWhiteSpace(text[offset])) offset++;
+            const string keyword = "new";
+            return offset + keyword.Length <= text.Length &&
+                string.CompareOrdinal(text, offset, keyword, 0, keyword.Length) == 0 &&
+                (offset + keyword.Length == text.Length ||
+                    !IsJavaScriptIdentifierCharacter(text[offset + keyword.Length]));
+        }
+
+        private static List<int> FindLiteralOccurrences(string text, string value)
+        {
+            List<int> result = new List<int>();
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(value)) return result;
+            int offset = 0;
+            while (offset < text.Length)
+            {
+                int found = text.IndexOf(value, offset, StringComparison.Ordinal);
+                if (found < 0) break;
+                result.Add(found);
+                offset = found + value.Length;
+            }
+            return result;
+        }
+
+        private static bool TryParseBoundedFunction(
+            string text,
+            int occurrence,
+            out BoundedSemanticDocument bounded)
+        {
+            bounded = null;
+            if (string.IsNullOrEmpty(text) || occurrence < 0 || occurrence >= text.Length)
+            {
+                return false;
+            }
+
+            int minimumStart = Math.Max(0, occurrence - MaximumFunctionLookBehind);
+            int functionStart = text.LastIndexOf(
+                "function",
+                occurrence,
+                occurrence - minimumStart + 1,
+                StringComparison.Ordinal);
+            while (functionStart >= minimumStart)
+            {
+                int functionEnd;
+                if (IsFunctionKeyword(text, functionStart) &&
+                    TryFindFunctionEnd(text, functionStart, out functionEnd) &&
+                    functionEnd >= occurrence)
+                {
+                    int length = functionEnd - functionStart + 1;
+                    string fragment = text.Substring(functionStart, length);
+                    byte[] fragmentBytes = Encoding.UTF8.GetBytes(fragment);
+                    if (!HasOnlyLiteralSpellings(fragmentBytes, fragment, "hidden") ||
+                        !HasOnlyLiteralSpellings(fragmentBytes, fragment, "model") ||
+                        !HasOnlyLiteralSpellings(fragmentBytes, fragment, "has"))
+                    {
+                        return false;
+                    }
+                    try
+                    {
+                        JavaScriptSemanticDocument document =
+                            JavaScriptSemanticDocument.Parse(fragment);
+                        bounded = new BoundedSemanticDocument(
+                            functionStart,
+                            length,
+                            document);
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+
+                int previousSearchStart = functionStart - 1;
+                if (previousSearchStart < minimumStart) break;
+                functionStart = text.LastIndexOf(
+                    "function",
+                    previousSearchStart,
+                    previousSearchStart - minimumStart + 1,
+                    StringComparison.Ordinal);
+            }
+            return false;
+        }
+
+        private static bool TryFindFunctionEnd(
+            string text,
+            int functionStart,
+            out int functionEnd)
+        {
+            functionEnd = -1;
+            int limit = Math.Min(text.Length, functionStart + MaximumFunctionFragmentLength);
+            int parenthesisDepth = 0;
+            int braceDepth = 0;
+            bool parametersStarted = false;
+            bool parametersComplete = false;
+            bool bodyStarted = false;
+            for (int index = functionStart + "function".Length; index < limit; index++)
+            {
+                char current = text[index];
+                if (current == '\'' || current == '"' || current == '`')
+                {
+                    if (!TrySkipQuotedText(text, current, ref index, limit)) return false;
+                    continue;
+                }
+                if (current == '/' && index + 1 < limit)
+                {
+                    char next = text[index + 1];
+                    if (next == '/')
+                    {
+                        index += 2;
+                        while (index < limit && text[index] != '\r' && text[index] != '\n') index++;
+                        continue;
+                    }
+                    if (next == '*')
+                    {
+                        int close = text.IndexOf("*/", index + 2, StringComparison.Ordinal);
+                        if (close < 0 || close >= limit) return false;
+                        index = close + 1;
+                        continue;
+                    }
+                }
+
+                if (!bodyStarted)
+                {
+                    if (current == '(')
+                    {
+                        parametersStarted = true;
+                        parenthesisDepth++;
+                    }
+                    else if (current == ')' && parametersStarted)
+                    {
+                        parenthesisDepth--;
+                        if (parenthesisDepth < 0) return false;
+                        if (parenthesisDepth == 0) parametersComplete = true;
+                    }
+                    else if (current == '{' && parametersComplete)
+                    {
+                        bodyStarted = true;
+                        braceDepth = 1;
+                    }
+                    continue;
+                }
+
+                if (current == '{') braceDepth++;
+                else if (current == '}')
+                {
+                    braceDepth--;
+                    if (braceDepth == 0)
+                    {
+                        functionEnd = index;
+                        return true;
+                    }
+                    if (braceDepth < 0) return false;
+                }
+            }
+            return false;
+        }
+
+        private static bool TrySkipQuotedText(
+            string text,
+            char quote,
+            ref int index,
+            int limit)
+        {
+            for (index++; index < limit; index++)
+            {
+                char current = text[index];
+                if (current == '\\')
+                {
+                    index++;
+                    continue;
+                }
+                if (current == quote) return true;
+                if (quote != '`' && (current == '\r' || current == '\n')) return false;
+            }
+            return false;
+        }
+
+        private static bool IsFunctionKeyword(string text, int offset)
+        {
+            int before = offset - 1;
+            int after = offset + "function".Length;
+            return (before < 0 || !IsJavaScriptIdentifierCharacter(text[before])) &&
+                (after >= text.Length || !IsJavaScriptIdentifierCharacter(text[after]));
+        }
+
+        private static bool IsJavaScriptIdentifierCharacter(char value)
+        {
+            return char.IsLetterOrDigit(value) || value == '_' || value == '$';
+        }
+
         private static IEnumerable<SemanticModelCandidate> FindSemanticCandidates(
             AsarArchiveEntry entry,
             byte[] data,
-            JavaScriptSemanticDocument document)
+            JavaScriptSemanticDocument document,
+            int sourceOffset)
         {
             List<SemanticModelCandidate> result = new List<SemanticModelCandidate>();
             foreach (JavaScriptNodeRecord record in document.Records)
@@ -548,7 +887,7 @@ namespace CodexPortableManager
                     {
                         Entry = entry,
                         Data = data,
-                        Start = conditional.Range.Start,
+                        Start = sourceOffset + conditional.Range.Start,
                         Length = conditional.Range.End - conditional.Range.Start,
                         OfficialExpression = document.Slice(conditional),
                         HiddenExpression = document.Slice(conditional.Alternate),
@@ -580,7 +919,7 @@ namespace CodexPortableManager
                 {
                     Entry = entry,
                     Data = data,
-                    Start = logical.Range.Start,
+                    Start = sourceOffset + logical.Range.Start,
                     Length = logical.Range.End - logical.Range.Start + PatchedMarker.Length,
                     OfficialExpression = document.Slice(original),
                     HiddenExpression = document.Slice(logical.Left),
@@ -859,6 +1198,23 @@ namespace CodexPortableManager
 
             internal AsarArchiveEntry Entry;
             internal byte[] Data;
+        }
+
+        private sealed class BoundedSemanticDocument
+        {
+            internal BoundedSemanticDocument(
+                int offset,
+                int length,
+                JavaScriptSemanticDocument document)
+            {
+                Offset = offset;
+                Length = length;
+                Document = document;
+            }
+
+            internal int Offset;
+            internal int Length;
+            internal JavaScriptSemanticDocument Document;
         }
 
         private sealed class SemanticModelCandidate

@@ -31,6 +31,19 @@ namespace CodexPortableManager
             CompatibilityOptions compatibility,
             bool defaultUnsupportedToDisabled)
         {
+            return CompatibilityAnalysisMemory.Run(
+                () => ApplyInternalCore(
+                    executablePath,
+                    compatibility,
+                    defaultUnsupportedToDisabled),
+                log);
+        }
+
+        private CompatibilityResult ApplyInternalCore(
+            string executablePath,
+            CompatibilityOptions compatibility,
+            bool defaultUnsupportedToDisabled)
+        {
             if (compatibility == null) throw new ArgumentNullException(nameof(compatibility));
 
             bool manageSandbox = compatibility.ManageSandboxCompatibility;
