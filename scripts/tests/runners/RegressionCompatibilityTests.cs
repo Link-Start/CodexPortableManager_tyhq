@@ -2855,6 +2855,8 @@ internal static partial class RegressionTestRunner
                 (System.Windows.Controls.TextBox)window.FindName("logBox");
             Assert(summary.Visibility == System.Windows.Visibility.Collapsed,
                 "紧凑高度仍保留重复顶部摘要，压缩了主操作区。");
+            Assert(System.Windows.Controls.Grid.GetRow(activityPane) == 1,
+                "窄窗口没有使用底部任务布局。");
             Assert(workspace.ActualHeight >= 180,
                 "紧凑窗口主操作区高度不足。实际：" + workspace.ActualHeight);
             Assert(logBox.TextWrapping == System.Windows.TextWrapping.NoWrap &&
@@ -2874,40 +2876,39 @@ internal static partial class RegressionTestRunner
                 logBox.Text.IndexOf("批量日志测试三", StringComparison.Ordinal) >= 0,
                 "连续日志没有通过合并调度完整刷新到界面。");
 
-            bool observedSynchronousWideLayout = false;
-            bool observedSynchronousNarrowLayout = false;
-            window.SizeChanged += delegate
-            {
-                if (window.ActualWidth >= 1090)
-                {
-                    observedSynchronousWideLayout =
-                        System.Windows.Controls.Grid.GetColumn(activityPane) == 2;
-                }
-                else if (window.ActualWidth <= 1030)
-                {
-                    observedSynchronousNarrowLayout =
-                        System.Windows.Controls.Grid.GetRow(activityPane) == 1;
-                }
-            };
+            MainWindow.ResponsiveLayoutState initialNarrow =
+                MainWindow.ResolveResponsiveLayout(1059, 700, false, false, false);
+            MainWindow.ResponsiveLayoutState initialWide =
+                MainWindow.ResolveResponsiveLayout(1060, 699, false, false, false);
+            Assert(!initialNarrow.Wide && !initialNarrow.CompactHeight &&
+                initialWide.Wide && initialWide.CompactHeight,
+                "响应式布局的初始宽度或高度断点不正确。");
 
-            window.Width = 1070;
-            window.UpdateLayout();
-            Assert(System.Windows.Controls.Grid.GetRow(activityPane) == 1,
-                "窄布局在断点滞回区内过早切换到宽布局。");
-            window.Width = 1100;
-            window.UpdateLayout();
-            Assert(System.Windows.Controls.Grid.GetColumn(activityPane) == 2,
-                "越过宽布局滞回区后没有在当前布局周期切换到侧栏布局。");
-            window.Width = 1050;
-            window.UpdateLayout();
-            Assert(System.Windows.Controls.Grid.GetColumn(activityPane) == 2,
-                "宽布局在断点滞回区内过早退回窄布局。");
-            window.Width = 1020;
-            window.UpdateLayout();
-            Assert(System.Windows.Controls.Grid.GetRow(activityPane) == 1,
-                "低于宽布局滞回区后没有在当前布局周期退回底部任务布局。");
-            Assert(observedSynchronousWideLayout && observedSynchronousNarrowLayout,
-                "响应式布局没有在 SizeChanged 的同一事件周期完成。");
+            MainWindow.ResponsiveLayoutState retainedNarrow =
+                MainWindow.ResolveResponsiveLayout(1083, 700, true, false, false);
+            MainWindow.ResponsiveLayoutState enteredWide =
+                MainWindow.ResolveResponsiveLayout(1084, 700, true, false, false);
+            MainWindow.ResponsiveLayoutState retainedWide =
+                MainWindow.ResolveResponsiveLayout(1036, 700, true, true, false);
+            MainWindow.ResponsiveLayoutState exitedWide =
+                MainWindow.ResolveResponsiveLayout(1035, 700, true, true, false);
+            Assert(!retainedNarrow.Wide && enteredWide.Wide &&
+                retainedWide.Wide && !exitedWide.Wide,
+                "宽布局断点滞回规则不正确。");
+
+            MainWindow.ResponsiveLayoutState retainedRegularHeight =
+                MainWindow.ResolveResponsiveLayout(760, 676, true, false, false);
+            MainWindow.ResponsiveLayoutState enteredCompactHeight =
+                MainWindow.ResolveResponsiveLayout(760, 675, true, false, false);
+            MainWindow.ResponsiveLayoutState retainedCompactHeight =
+                MainWindow.ResolveResponsiveLayout(760, 723, true, false, true);
+            MainWindow.ResponsiveLayoutState exitedCompactHeight =
+                MainWindow.ResolveResponsiveLayout(760, 724, true, false, true);
+            Assert(!retainedRegularHeight.CompactHeight &&
+                enteredCompactHeight.CompactHeight &&
+                retainedCompactHeight.CompactHeight &&
+                !exitedCompactHeight.CompactHeight,
+                "紧凑高度断点滞回规则不正确。");
             System.Windows.Interop.HwndSource source =
                 System.Windows.PresentationSource.FromVisual(window) as
                     System.Windows.Interop.HwndSource;

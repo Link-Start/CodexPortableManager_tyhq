@@ -108,5 +108,5 @@
 
 - 当前构建产物为单 EXE，内嵌第三方程序集按固定 SHA-256 校验，Release、开发副本和测试绑定副本可以通过摘要确认来自同一次确定性构建。
 - 当前仓库构建流程尚未执行 Authenticode 代码签名；这不影响管理器对官方 MSIX 的签名验证，但意味着 Windows 无法用发布者证书确认管理器 EXE 本身的来源。
-- `v1.1.0` Release 发布物包含 `CodexPortableManager.exe` 和 `SHA256SUMS.txt`。正式 EXE 为 1,820,672 字节，SHA-256 为 `372E0CD62ED063622AB15083E0E912B037D125CE28008213461F01FAC19ED156`；本地 Release 构建、190 项隔离回归、离线 Store/网络、路径自动刷新、PowerShell 语法和真实官方 MSIX 信任验证均已通过，GitHub Windows 验证由发布标签推送触发并作为正式 Release 发布门禁。
+- `v1.1.0` Release 发布物包含 `CodexPortableManager.exe` 和 `SHA256SUMS.txt`。正式 EXE 为 1,821,184 字节，SHA-256 为 `01631D4C3537FC6593A0A4238FC43423C50CA67F297835BFB48E9CD9865F05A2`；本地 Release 构建、190 项隔离回归、离线 Store/网络、路径自动刷新、PowerShell 语法和真实官方 MSIX 信任验证均已通过，GitHub Windows 验证由发布标签推送触发并作为正式 Release 发布门禁。
 - 后续公开发布仍应优先增加带可信时间戳的 Authenticode 签名，并继续同步发布最终 EXE 的 SHA-256。签名和校验和生成必须位于最终发布文件确定之后，不能复用官方 MSIX 的信任结果替代管理器自身的发布认证。

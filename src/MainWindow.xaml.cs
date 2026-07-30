@@ -184,16 +184,14 @@ namespace CodexPortableManager
         {
             double availableWidth = ActualWidth > 0 ? ActualWidth : Width;
             double availableHeight = ActualHeight > 0 ? ActualHeight : Height;
-            bool wideLayout = responsiveLayoutInitialized
-                ? appliedWideLayout
-                    ? availableWidth >= WideLayoutBreakpoint - WideLayoutHysteresis
-                    : availableWidth >= WideLayoutBreakpoint + WideLayoutHysteresis
-                : availableWidth >= WideLayoutBreakpoint;
-            bool compactHeight = responsiveLayoutInitialized
-                ? appliedCompactHeight
-                    ? availableHeight < CompactHeightBreakpoint + CompactHeightHysteresis
-                    : availableHeight < CompactHeightBreakpoint - CompactHeightHysteresis
-                : availableHeight < CompactHeightBreakpoint;
+            ResponsiveLayoutState layout = ResolveResponsiveLayout(
+                availableWidth,
+                availableHeight,
+                responsiveLayoutInitialized,
+                appliedWideLayout,
+                appliedCompactHeight);
+            bool wideLayout = layout.Wide;
+            bool compactHeight = layout.CompactHeight;
             bool widthModeChanged = !responsiveLayoutInitialized || appliedWideLayout != wideLayout;
             bool heightModeChanged = !responsiveLayoutInitialized || appliedCompactHeight != compactHeight;
             bool narrowLogModeChanged = !responsiveLayoutInitialized ||
@@ -252,6 +250,39 @@ namespace CodexPortableManager
             {
                 QueueMainScrollEdgeUpdate();
             }
+        }
+
+        internal static ResponsiveLayoutState ResolveResponsiveLayout(
+            double availableWidth,
+            double availableHeight,
+            bool initialized,
+            bool currentlyWide,
+            bool currentlyCompactHeight)
+        {
+            bool wide = initialized
+                ? currentlyWide
+                    ? availableWidth >= WideLayoutBreakpoint - WideLayoutHysteresis
+                    : availableWidth >= WideLayoutBreakpoint + WideLayoutHysteresis
+                : availableWidth >= WideLayoutBreakpoint;
+            bool compactHeight = initialized
+                ? currentlyCompactHeight
+                    ? availableHeight < CompactHeightBreakpoint + CompactHeightHysteresis
+                    : availableHeight < CompactHeightBreakpoint - CompactHeightHysteresis
+                : availableHeight < CompactHeightBreakpoint;
+            return new ResponsiveLayoutState(wide, compactHeight);
+        }
+
+        internal struct ResponsiveLayoutState
+        {
+            internal ResponsiveLayoutState(bool wide, bool compactHeight)
+            {
+                Wide = wide;
+                CompactHeight = compactHeight;
+            }
+
+            internal bool Wide { get; private set; }
+
+            internal bool CompactHeight { get; private set; }
         }
 
         private void UpdateStatusSummaryLayout(bool wideLayout)
