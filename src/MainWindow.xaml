@@ -650,6 +650,24 @@
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <StackPanel>
+                                                <TextBlock Text="完整显示模型推理内容" Style="{StaticResource FeatureTitleStyle}" />
+                                                <TextBlock x:Name="reasoningDisplayDescriptionLabel"
+                                                           Text="优先显示模型返回的原始推理内容，并取消推理区域内部固定高度；没有原始内容时继续显示官方摘要。"
+                                                           Style="{StaticResource FeatureDescriptionStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock x:Name="reasoningDisplayStatusLabel" Text="读取中" Style="{StaticResource CompatibilityStatusStyle}" />
+                                                <CheckBox x:Name="reasoningDisplayCheckBox"
+                                                          Style="{StaticResource ToggleSwitchStyle}"
+                                                          AutomationProperties.Name="完整显示模型推理内容"
+                                                          AutomationProperties.HelpText="优先显示模型返回的原始推理内容，并取消推理区域内部固定高度；没有原始内容时继续显示官方摘要。" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                    <Border BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="0,11,0,12">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel>
                                                 <TextBlock Text="补全中文菜单和托盘文字" Style="{StaticResource FeatureTitleStyle}" />
                                                 <TextBlock x:Name="chineseUiDescriptionLabel"
                                                            Text="当 Codex 使用简体中文时，翻译顶部的“文件、编辑、视图、帮助”菜单，以及托盘右键菜单中的“打开 Codex、新建任务、未读、更多任务、退出”等文字。"

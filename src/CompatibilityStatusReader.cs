@@ -62,13 +62,24 @@ namespace CodexPortableManager
         internal static CompatibilityOptions ResolveOptions(CompatibilityOverview overview)
         {
             CompatibilitySwitchFacts facts = ResolveSwitchFacts(overview);
-            if (!facts.AllKnown) return null;
+            bool? reasoningDisplay = facts.ReasoningDisplayEnabled.HasValue
+                ? facts.ReasoningDisplayEnabled
+                : ResolveUnsupportedOfficialReasoningDisplay(overview);
+            if (!facts.SandboxCompatibilityEnabled.HasValue ||
+                !facts.UnlockModelCatalogEnabled.HasValue ||
+                !facts.SupplementChineseUiEnabled.HasValue ||
+                !facts.EnglishTechnicalParametersEnabled.HasValue ||
+                !reasoningDisplay.HasValue)
+            {
+                return null;
+            }
 
             return new CompatibilityOptions(
                 facts.SandboxCompatibilityEnabled.Value,
                 facts.UnlockModelCatalogEnabled.Value,
                 facts.SupplementChineseUiEnabled.Value,
-                facts.EnglishTechnicalParametersEnabled.Value);
+                facts.EnglishTechnicalParametersEnabled.Value,
+                reasoningDisplay.Value);
         }
 
         internal static CompatibilitySwitchFacts ResolveSwitchFacts(
@@ -77,11 +88,19 @@ namespace CodexPortableManager
             bool sandboxAvailable = CanResolveFeature(overview, "SandboxCompatibility");
             bool modelAvailable = CanResolveFeature(overview, "ModelCatalog");
             bool localizationAvailable = CanResolveFeature(overview, "Localization");
+            bool reasoningDisplayAvailable = CanResolveFeature(
+                overview,
+                "ReasoningDisplay");
             bool localizationNeedsRefresh = localizationAvailable &&
                 string.Equals(
                     GetLocalizationComponent(overview, "Menus"),
                     "PatchedRefreshRequired",
                     StringComparison.OrdinalIgnoreCase);
+            bool reasoningDisplayNeedsRefresh = reasoningDisplayAvailable &&
+                HasFeatureState(
+                    overview,
+                    "ReasoningDisplay",
+                    "PatchedRefreshRequired");
             return new CompatibilitySwitchFacts(
                 sandboxAvailable
                     ? ResolveSimpleState(overview, "SandboxCompatibility", "Enabled", "Disabled")
@@ -95,7 +114,34 @@ namespace CodexPortableManager
                 localizationAvailable
                     ? ResolveLocalizationState(overview, "Reasoning")
                     : null,
-                localizationNeedsRefresh);
+                reasoningDisplayAvailable
+                    ? reasoningDisplayNeedsRefresh
+                        ? (bool?)true
+                        : ResolveSimpleState(
+                            overview,
+                            "ReasoningDisplay",
+                            "Patched",
+                            "Official")
+                    : null,
+                localizationNeedsRefresh,
+                reasoningDisplayNeedsRefresh);
+        }
+
+        private static bool HasFeatureState(
+            CompatibilityOverview overview,
+            string featureId,
+            string state)
+        {
+            if (overview == null) return false;
+            CompatibilityObservedFeature observed = overview.Features.FirstOrDefault(
+                feature => string.Equals(
+                    feature.FeatureId,
+                    featureId,
+                    StringComparison.OrdinalIgnoreCase));
+            return observed != null && string.Equals(
+                observed.After,
+                state,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         internal static bool CanResolveFeature(
@@ -117,6 +163,32 @@ namespace CodexPortableManager
             return observed.Status != CompatibilityFeatureStatus.Failed &&
                 observed.Status != CompatibilityFeatureStatus.RolledBack &&
                 observed.Status != CompatibilityFeatureStatus.Unsupported;
+        }
+
+        private static bool? ResolveUnsupportedOfficialReasoningDisplay(
+            CompatibilityOverview overview)
+        {
+            if (overview == null ||
+                (overview.State != CompatibilityOverviewState.Recorded &&
+                 overview.State != CompatibilityOverviewState.Inspected &&
+                 overview.State != CompatibilityOverviewState.Verified))
+            {
+                return null;
+            }
+            CompatibilityObservedFeature observed = overview.Features.FirstOrDefault(
+                feature => string.Equals(
+                    feature.FeatureId,
+                    "ReasoningDisplay",
+                    StringComparison.OrdinalIgnoreCase));
+            return observed != null &&
+                observed.RecipeCurrent &&
+                observed.Status == CompatibilityFeatureStatus.Unsupported &&
+                string.Equals(
+                    observed.After,
+                    CompatibilityPatchState.Official.ToString(),
+                    StringComparison.OrdinalIgnoreCase)
+                ? (bool?)false
+                : null;
         }
 
         internal static bool? ResolveSimpleState(
@@ -210,6 +282,11 @@ namespace CodexPortableManager
                     CompatibilityFeatureChange localization =
                         CodexLocalizationCompatibility.Inspect(session);
                     features.Add(CreateObserved("Localization", localization));
+                    CompatibilityFeatureChange reasoningDisplay =
+                        ReasoningDisplayCompatibility.Inspect(session);
+                    features.Add(CreateObserved(
+                        "ReasoningDisplay",
+                        reasoningDisplay));
                 }
             }
             catch (Exception exception)
@@ -282,7 +359,13 @@ namespace CodexPortableManager
             ICollection<CompatibilityObservedFeature> features,
             string error)
         {
-            string[] missing = { "SandboxCompatibility", "ModelCatalog", "Localization" };
+            string[] missing =
+            {
+                "SandboxCompatibility",
+                "ModelCatalog",
+                "Localization",
+                "ReasoningDisplay"
+            };
             foreach (string featureId in missing.Where(id => features.All(feature =>
                 !string.Equals(feature.FeatureId, id, StringComparison.OrdinalIgnoreCase))))
             {
@@ -317,9 +400,20 @@ namespace CodexPortableManager
             {
                 return CompatibilityCoordinator.SandboxRecipeId;
             }
-            return string.Equals(featureId, "ModelCatalog", StringComparison.OrdinalIgnoreCase)
-                ? ModelCatalogCompatibility.RecipeId
-                : CodexLocalizationCompatibility.RecipeId;
+            if (string.Equals(featureId, "ModelCatalog", StringComparison.OrdinalIgnoreCase))
+            {
+                return ModelCatalogCompatibility.RecipeId;
+            }
+            if (string.Equals(featureId, "Localization", StringComparison.OrdinalIgnoreCase))
+            {
+                return CodexLocalizationCompatibility.RecipeId;
+            }
+            return string.Equals(
+                featureId,
+                "ReasoningDisplay",
+                StringComparison.OrdinalIgnoreCase)
+                ? ReasoningDisplayCompatibility.RecipeId
+                : null;
         }
 
         private static CompatibilityOverview Create(

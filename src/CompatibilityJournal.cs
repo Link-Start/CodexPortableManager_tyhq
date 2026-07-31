@@ -38,6 +38,7 @@ namespace CodexPortableManager
 
     internal sealed class CompatibilityJournalRecord
     {
+        public int SchemaVersion { get; set; }
         public string OperationId { get; set; }
         public string InstallRoot { get; set; }
         public string InstallRootIdentity { get; set; }
@@ -56,9 +57,11 @@ namespace CodexPortableManager
         public bool UnlockModelCatalogEnabled { get; set; }
         public bool SupplementChineseUiEnabled { get; set; }
         public bool EnglishTechnicalParametersEnabled { get; set; }
+        public bool ReasoningDisplayEnabled { get; set; }
         public bool ManageSandboxCompatibility { get; set; }
         public bool ManageModelCatalog { get; set; }
         public bool ManageLocalization { get; set; }
+        public bool ManageReasoningDisplay { get; set; }
 
         internal static CompatibilityOptionsSnapshot From(CompatibilityOptions options)
         {
@@ -69,15 +72,18 @@ namespace CodexPortableManager
                 UnlockModelCatalogEnabled = options.UnlockModelCatalogEnabled,
                 SupplementChineseUiEnabled = options.SupplementChineseUiEnabled,
                 EnglishTechnicalParametersEnabled = options.EnglishTechnicalParametersEnabled,
+                ReasoningDisplayEnabled = options.ReasoningDisplayEnabled,
                 ManageSandboxCompatibility = options.ManageSandboxCompatibility,
                 ManageModelCatalog = options.ManageModelCatalog,
-                ManageLocalization = options.ManageLocalization
+                ManageLocalization = options.ManageLocalization,
+                ManageReasoningDisplay = options.ManageReasoningDisplay
             };
         }
     }
 
     internal sealed class CompatibilityTransaction
     {
+        private const int CurrentSchemaVersion = 2;
         private readonly CompatibilityJournalRecord record;
 
         private CompatibilityTransaction(CompatibilityJournalRecord journalRecord)
@@ -155,6 +161,7 @@ namespace CodexPortableManager
 
             CompatibilityJournalRecord journal = new CompatibilityJournalRecord
             {
+                SchemaVersion = CurrentSchemaVersion,
                 OperationId = Guid.NewGuid().ToString("N"),
                 InstallRoot = root,
                 InstallRootIdentity = installRootIdentity,
@@ -364,8 +371,15 @@ namespace CodexPortableManager
             {
                 string json = File.ReadAllText(path, Encoding.UTF8);
                 JavaScriptSerializer serializer = new JavaScriptSerializer();
-                ValidateSerializedShape(serializer.DeserializeObject(json), path);
+                bool legacy = ValidateSerializedShape(
+                    serializer.DeserializeObject(json),
+                    path);
                 journal = serializer.Deserialize<CompatibilityJournalRecord>(json);
+                if (legacy)
+                {
+                    // 旧日志已经按七字段原始形状完成严格验证；升级仅用于继续安全恢复。
+                    journal.SchemaVersion = CurrentSchemaVersion;
+                }
             }
             catch (Exception exception)
             {
@@ -822,6 +836,7 @@ namespace CodexPortableManager
             Guid operationId;
             Guid installId;
             if (journal == null ||
+                journal.SchemaVersion != CurrentSchemaVersion ||
                 !Guid.TryParseExact(journal.OperationId, "N", out operationId) ||
                 !Guid.TryParseExact(journal.InstallId, "N", out installId) ||
                 !RootsEqual(journal.InstallRoot, expectedInstallRoot) ||
@@ -867,12 +882,20 @@ namespace CodexPortableManager
             }
         }
 
-        private static void ValidateSerializedShape(object value, string path)
+        private static bool ValidateSerializedShape(object value, string path)
         {
             IDictionary<string, object> fields = value as IDictionary<string, object>;
             object targetOptionsValue;
             object artifactsValue;
+            object schemaVersionValue;
+            bool legacy = fields != null &&
+                !fields.TryGetValue("SchemaVersion", out schemaVersionValue);
             if (fields == null ||
+                !legacy &&
+                    (!HasStrictInt32(fields, "SchemaVersion") ||
+                     Convert.ToInt32(
+                         fields["SchemaVersion"],
+                         CultureInfo.InvariantCulture) != CurrentSchemaVersion) ||
                 !HasStrictString(fields, "OperationId", false) ||
                 !HasStrictString(fields, "InstallRoot", false) ||
                 !HasStrictString(fields, "InstallRootIdentity", false) ||
@@ -880,7 +903,7 @@ namespace CodexPortableManager
                 !HasStrictBoolean(fields, "InstallMarkerRequired") ||
                 !HasStrictInt32(fields, "Phase") ||
                 !fields.TryGetValue("TargetOptions", out targetOptionsValue) ||
-                !ValidateOptionsShape(targetOptionsValue) ||
+                !ValidateOptionsShape(targetOptionsValue, legacy) ||
                 !fields.TryGetValue("Artifacts", out artifactsValue) ||
                 !ValidateArtifactsShape(artifactsValue) ||
                 !HasStrictString(fields, "BackupDirectoryIdentity", true) ||
@@ -889,19 +912,23 @@ namespace CodexPortableManager
                 throw new InvalidDataException(
                     "兼容维护事务状态缺少必需字段或字段类型无效：" + path);
             }
+            return legacy;
         }
 
-        private static bool ValidateOptionsShape(object value)
+        private static bool ValidateOptionsShape(object value, bool legacy)
         {
             IDictionary<string, object> fields = value as IDictionary<string, object>;
-            return fields != null &&
+            if (fields == null || fields.Count != (legacy ? 7 : 9)) return false;
+            return
                 HasStrictBoolean(fields, "SandboxCompatibilityEnabled") &&
                 HasStrictBoolean(fields, "UnlockModelCatalogEnabled") &&
                 HasStrictBoolean(fields, "SupplementChineseUiEnabled") &&
                 HasStrictBoolean(fields, "EnglishTechnicalParametersEnabled") &&
+                (legacy || HasStrictBoolean(fields, "ReasoningDisplayEnabled")) &&
                 HasStrictBoolean(fields, "ManageSandboxCompatibility") &&
                 HasStrictBoolean(fields, "ManageModelCatalog") &&
-                HasStrictBoolean(fields, "ManageLocalization");
+                HasStrictBoolean(fields, "ManageLocalization") &&
+                (legacy || HasStrictBoolean(fields, "ManageReasoningDisplay"));
         }
 
         private static bool ValidateArtifactsShape(object value)

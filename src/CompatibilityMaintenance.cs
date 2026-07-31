@@ -335,7 +335,11 @@ namespace CodexPortableManager
             if (result == null) return false;
             return CanCommitFeature("ModelCatalog", result.ModelCatalogSucceeded, result.ModelCatalog) &&
                 CanCommitFeature("SandboxCompatibility", result.SandboxSucceeded, result.Sandbox) &&
-                CanCommitFeature("Localization", result.LocalizationSucceeded, result.Localization);
+                CanCommitFeature("Localization", result.LocalizationSucceeded, result.Localization) &&
+                CanCommitFeature(
+                    ReasoningDisplayCompatibility.FeatureId,
+                    result.ReasoningDisplaySucceeded,
+                    result.ReasoningDisplay);
         }
 
         private static bool CanCommitFeature(
@@ -380,7 +384,8 @@ namespace CodexPortableManager
             };
             if (options.ManageModelCatalog ||
                 options.ManageSandboxCompatibility ||
-                options.ManageLocalization)
+                options.ManageLocalization ||
+                options.ManageReasoningDisplay)
             {
                 artifacts.Add(CombineRelative(resources, "app.asar"));
             }
@@ -400,7 +405,8 @@ namespace CodexPortableManager
             if (options.UnlockModelCatalogEnabled ||
                 options.SandboxCompatibilityEnabled ||
                 options.SupplementChineseUiEnabled ||
-                options.EnglishTechnicalParametersEnabled)
+                options.EnglishTechnicalParametersEnabled ||
+                options.ReasoningDisplayEnabled)
             {
                 artifacts.Add(CombineRelative(resources, "app.asar"));
             }
@@ -431,6 +437,7 @@ namespace CodexPortableManager
                 ModelCatalogSucceeded = true,
                 SandboxSucceeded = true,
                 LocalizationSucceeded = true,
+                ReasoningDisplaySucceeded = true,
                 ModelCatalog = CreateFeature(
                     "ModelCatalog",
                     "模型目录",
@@ -454,6 +461,14 @@ namespace CodexPortableManager
                     "Menus=Official;Reasoning=Official",
                     CompatibilityFeatureStatus.AlreadySatisfied,
                     CodexLocalizationCompatibility.RecipeId,
+                    null),
+                ReasoningDisplay = CreateFeature(
+                    ReasoningDisplayCompatibility.FeatureId,
+                    "模型推理显示",
+                    "Official",
+                    "Official",
+                    CompatibilityFeatureStatus.AlreadySatisfied,
+                    ReasoningDisplayCompatibility.RecipeId,
                     null)
             };
         }
@@ -468,6 +483,7 @@ namespace CodexPortableManager
                 ModelCatalogSucceeded = false,
                 SandboxSucceeded = false,
                 LocalizationSucceeded = false,
+                ReasoningDisplaySucceeded = false,
                 ModelCatalog = CreateFeature(
                     "ModelCatalog",
                     "模型目录",
@@ -492,6 +508,14 @@ namespace CodexPortableManager
                     "Menus=Official;Reasoning=Official",
                     CompatibilityFeatureStatus.Failed,
                     CodexLocalizationCompatibility.RecipeId,
+                    error),
+                ReasoningDisplay = CreateFeature(
+                    ReasoningDisplayCompatibility.FeatureId,
+                    "模型推理显示",
+                    options.ReasoningDisplayEnabled ? "Patched" : "Official",
+                    "Official",
+                    CompatibilityFeatureStatus.Failed,
+                    ReasoningDisplayCompatibility.RecipeId,
                     error)
             };
         }

@@ -18,9 +18,11 @@ namespace CodexPortableManager
         internal bool ModelCatalogSucceeded = true;
         internal bool SandboxSucceeded = true;
         internal bool LocalizationSucceeded = true;
+        internal bool ReasoningDisplaySucceeded = true;
         internal CompatibilityFeatureChange ModelCatalogChange;
         internal CompatibilityFeatureChange SandboxChange;
         internal CompatibilityFeatureChange LocalizationChange;
+        internal CompatibilityFeatureChange ReasoningDisplayChange;
     }
 
     internal sealed class CompatibilityFeatureChange
@@ -104,31 +106,33 @@ namespace CodexPortableManager
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (!options.ManageModelCatalog &&
                 !options.ManageSandboxCompatibility &&
-                !options.ManageLocalization)
+                !options.ManageLocalization &&
+                !options.ManageReasoningDisplay)
             {
                 return new CompatibilityPlanResult();
             }
-            return ApplyInternal(
-                executablePath,
-                options.ManageModelCatalog,
-                options.UnlockModelCatalogEnabled,
-                options.ManageSandboxCompatibility,
-                options.SandboxCompatibilityEnabled,
-                options.ManageLocalization,
-                options.SupplementChineseUiEnabled,
-                options.EnglishTechnicalParametersEnabled,
-                defaultUnsupportedToDisabled);
+            return ApplyInternal(executablePath, options, defaultUnsupportedToDisabled);
         }
 
         internal bool ApplyModel(string executablePath, bool enabled)
         {
-            return ApplyInternal(executablePath, true, enabled, false, false, false, false, false, false)
+            return ApplyInternal(
+                executablePath,
+                new CompatibilityOptions(
+                    false, enabled, false, false, false,
+                    false, true, false, false),
+                false)
                 .ModelCatalogSucceeded;
         }
 
         internal bool ApplySandbox(string executablePath, bool enabled)
         {
-            return ApplyInternal(executablePath, false, false, true, enabled, false, false, false, false)
+            return ApplyInternal(
+                executablePath,
+                new CompatibilityOptions(
+                    enabled, false, false, false, false,
+                    true, false, false, false),
+                false)
                 .SandboxSucceeded;
         }
 
@@ -136,27 +140,45 @@ namespace CodexPortableManager
         {
             return ApplyInternal(
                 executablePath,
-                false,
-                false,
-                false,
-                false,
-                true,
-                chineseMenusEnabled,
-                englishReasoningEnabled,
+                new CompatibilityOptions(
+                    false,
+                    false,
+                    chineseMenusEnabled,
+                    englishReasoningEnabled,
+                    false,
+                    false,
+                    false,
+                    true,
+                    false),
                 false).LocalizationSucceeded;
+        }
+
+        internal bool ApplyReasoningDisplay(string executablePath, bool enabled)
+        {
+            return ApplyInternal(
+                executablePath,
+                new CompatibilityOptions(
+                    false, false, false, false, enabled,
+                    false, false, false, true),
+                false)
+                .ReasoningDisplaySucceeded;
         }
 
         private CompatibilityPlanResult ApplyInternal(
             string executablePath,
-            bool includeModel,
-            bool modelEnabled,
-            bool includeSandbox,
-            bool sandboxEnabled,
-            bool includeLocalization,
-            bool chineseMenusEnabled,
-            bool englishReasoningEnabled,
+            CompatibilityOptions options,
             bool defaultUnsupportedToDisabled)
         {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            bool includeModel = options.ManageModelCatalog;
+            bool modelEnabled = options.UnlockModelCatalogEnabled;
+            bool includeSandbox = options.ManageSandboxCompatibility;
+            bool sandboxEnabled = options.SandboxCompatibilityEnabled;
+            bool includeLocalization = options.ManageLocalization;
+            bool chineseMenusEnabled = options.SupplementChineseUiEnabled;
+            bool englishReasoningEnabled = options.EnglishTechnicalParametersEnabled;
+            bool includeReasoningDisplay = options.ManageReasoningDisplay;
+            bool reasoningDisplayEnabled = options.ReasoningDisplayEnabled;
             CompatibilityPlanResult result = new CompatibilityPlanResult();
             string asarPath;
             try
@@ -171,8 +193,15 @@ namespace CodexPortableManager
                     includeSandbox,
                     sandboxEnabled,
                     includeLocalization,
+                    includeReasoningDisplay,
+                    reasoningDisplayEnabled,
                     exception);
-                SetIncludedFailures(result, includeModel, includeSandbox, includeLocalization);
+                SetIncludedFailures(
+                    result,
+                    includeModel,
+                    includeSandbox,
+                    includeLocalization,
+                    includeReasoningDisplay);
                 return result;
             }
 
@@ -185,8 +214,15 @@ namespace CodexPortableManager
                     includeSandbox,
                     sandboxEnabled,
                     includeLocalization,
+                    includeReasoningDisplay,
+                    reasoningDisplayEnabled,
                     exception);
-                SetIncludedFailures(result, includeModel, includeSandbox, includeLocalization);
+                SetIncludedFailures(
+                    result,
+                    includeModel,
+                    includeSandbox,
+                    includeLocalization,
+                    includeReasoningDisplay);
                 return result;
             }
 
@@ -194,6 +230,10 @@ namespace CodexPortableManager
             if (includeModel) markers.AddRange(ModelCatalogCompatibility.ManagedMarkers);
             if (includeSandbox) markers.Add(SandboxCompatibility.ManagedMarker);
             if (includeLocalization) markers.AddRange(CodexLocalizationCompatibility.ManagedMarkers);
+            if (includeReasoningDisplay)
+            {
+                markers.AddRange(ReasoningDisplayCompatibility.ManagedMarkers);
+            }
 
             IDictionary<string, int> markerCounts;
             try
@@ -208,8 +248,15 @@ namespace CodexPortableManager
                     includeSandbox,
                     sandboxEnabled,
                     includeLocalization,
+                    includeReasoningDisplay,
+                    reasoningDisplayEnabled,
                     exception);
-                SetIncludedFailures(result, includeModel, includeSandbox, includeLocalization);
+                SetIncludedFailures(
+                    result,
+                    includeModel,
+                    includeSandbox,
+                    includeLocalization,
+                    includeReasoningDisplay);
                 return result;
             }
 
@@ -219,10 +266,15 @@ namespace CodexPortableManager
             bool menuMarkerPresent = includeLocalization && CodexLocalizationCompatibility.MenuMarkers.Any(value => Count(markerCounts, value) > 0);
             bool reasoningMarkerPresent = includeLocalization &&
                 Count(markerCounts, CodexLocalizationCompatibility.ReasoningFamilyMarker) > 0;
+            bool reasoningDisplayMarkerPresent = includeReasoningDisplay &&
+                ReasoningDisplayCompatibility.ManagedMarkers.Any(
+                    value => Count(markerCounts, value) > 0);
             bool modelActive = includeModel && (modelEnabled || modelMarkerPresent);
             bool sandboxActive = includeSandbox && (sandboxEnabled || sandboxMarkerPresent);
             bool localizationActive = includeLocalization &&
                 (chineseMenusEnabled || englishReasoningEnabled || menuMarkerPresent || reasoningMarkerPresent);
+            bool reasoningDisplayActive = includeReasoningDisplay &&
+                (reasoningDisplayEnabled || reasoningDisplayMarkerPresent);
 
             if (includeModel && !modelActive)
             {
@@ -236,7 +288,17 @@ namespace CodexPortableManager
             {
                 SafeLog("未检测到本工具的 Windows 沙箱账户名补丁，已保留官方 app.asar。");
             }
-            if (!modelActive && !sandboxActive && !localizationActive) return result;
+            if (includeReasoningDisplay && !reasoningDisplayActive)
+            {
+                SafeLog("未检测到本工具的模型推理显示补丁，已保留官方 app.asar。");
+            }
+            if (!modelActive &&
+                !sandboxActive &&
+                !localizationActive &&
+                !reasoningDisplayActive)
+            {
+                return result;
+            }
 
             AsarSession session;
             try
@@ -251,8 +313,15 @@ namespace CodexPortableManager
                     sandboxActive,
                     sandboxEnabled,
                     localizationActive,
+                    reasoningDisplayActive,
+                    reasoningDisplayEnabled,
                     exception);
-                SetIncludedFailures(result, modelActive, sandboxActive, localizationActive);
+                SetIncludedFailures(
+                    result,
+                    modelActive,
+                    sandboxActive,
+                    localizationActive,
+                    reasoningDisplayActive);
                 return result;
             }
 
@@ -302,13 +371,49 @@ namespace CodexPortableManager
                     englishReasoningEnabled || reasoningMarkerPresent,
                     log)
                 : CompatibilityFeatureChange.Unmanaged("Menus=NotManaged;Reasoning=NotManaged");
+            CompatibilityFeatureChange reasoningDisplayChange = reasoningDisplayActive
+                ? ReasoningDisplayCompatibility.Plan(
+                    session,
+                    reasoningDisplayEnabled,
+                    log)
+                : CompatibilityFeatureChange.Unmanaged(
+                    CompatibilityPatchState.Official.ToString());
+            if (defaultUnsupportedToDisabled &&
+                reasoningDisplayEnabled &&
+                reasoningDisplayChange.Status == CompatibilityFeatureStatus.Unsupported &&
+                !reasoningDisplayChange.Changed &&
+                string.Equals(
+                    reasoningDisplayChange.Before,
+                    CompatibilityPatchState.Official.ToString(),
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    reasoningDisplayChange.After,
+                    CompatibilityPatchState.Official.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                string reason = reasoningDisplayChange.Error;
+                reasoningDisplayChange.Succeeded = true;
+                reasoningDisplayChange.Desired =
+                    CompatibilityPatchState.Official.ToString();
+                reasoningDisplayChange.Status = CompatibilityFeatureStatus.NotRequired;
+                reasoningDisplayChange.Error = string.IsNullOrWhiteSpace(reason)
+                    ? "当前版本不支持该功能，已默认关闭。"
+                    : "当前版本不支持该功能，已默认关闭：" + reason;
+                reasoningDisplayChange.CompletionMessage =
+                    "当前版本没有可安全修改的模型推理显示入口，完整推理显示功能已默认关闭。";
+            }
 
             result.ModelCatalogChange = includeModel ? modelChange : null;
             result.SandboxChange = includeSandbox ? sandboxChange : null;
             result.LocalizationChange = includeLocalization ? localizationChange : null;
+            result.ReasoningDisplayChange = includeReasoningDisplay
+                ? reasoningDisplayChange
+                : null;
             result.ModelCatalogSucceeded = !includeModel || modelChange.Succeeded;
             result.SandboxSucceeded = !includeSandbox || sandboxChange.Succeeded;
             result.LocalizationSucceeded = !includeLocalization || localizationChange.Succeeded;
+            result.ReasoningDisplaySucceeded = !includeReasoningDisplay ||
+                reasoningDisplayChange.Succeeded;
 
             List<CompatibilityFeatureChange> changed = new List<CompatibilityFeatureChange>();
             if (modelChange.Succeeded && modelChange.Changed) changed.Add(modelChange);
@@ -318,6 +423,10 @@ namespace CodexPortableManager
                  localizationChange.Status == CompatibilityFeatureStatus.Unsupported))
             {
                 changed.Add(localizationChange);
+            }
+            if (reasoningDisplayChange.Succeeded && reasoningDisplayChange.Changed)
+            {
+                changed.Add(reasoningDisplayChange);
             }
             if (changed.Count == 0)
             {
@@ -342,18 +451,26 @@ namespace CodexPortableManager
                         result.SandboxSucceeded = false;
                         MarkValidationFailure(sandboxChange, exception);
                     }
+                    if (reasoningDisplayActive)
+                    {
+                        result.ReasoningDisplaySucceeded = false;
+                        MarkValidationFailure(reasoningDisplayChange, exception);
+                    }
                     LogUnavailableFeatures(
                         modelActive,
                         modelEnabled,
                         sandboxActive,
                         sandboxEnabled,
                         localizationActive,
+                        reasoningDisplayActive,
+                        reasoningDisplayEnabled,
                         exception);
                     return result;
                 }
                 LogCompletion(modelChange);
                 LogCompletion(sandboxChange);
                 LogCompletion(localizationChange);
+                LogCompletion(reasoningDisplayChange);
                 return result;
             }
 
@@ -369,6 +486,7 @@ namespace CodexPortableManager
                 LogCompletion(modelChange);
                 LogCompletion(sandboxChange);
                 LogCompletion(localizationChange);
+                LogCompletion(reasoningDisplayChange);
             }
             catch (Exception exception)
             {
@@ -399,6 +517,15 @@ namespace CodexPortableManager
                     sandboxChange.Changed = false;
                     SafeLog("警告：Windows 沙箱账户名兼容设置未能完成。统一 ASAR 临时文件验证失败，正式文件未被替换；原因：" + exception.Message);
                 }
+                if (reasoningDisplayChange.Changed)
+                {
+                    result.ReasoningDisplaySucceeded = false;
+                    reasoningDisplayChange.Status = CompatibilityFeatureStatus.Failed;
+                    reasoningDisplayChange.Error = exception.Message;
+                    reasoningDisplayChange.After = reasoningDisplayChange.Before;
+                    reasoningDisplayChange.Changed = false;
+                    SafeLog("警告：模型推理显示兼容设置未能完成。统一 ASAR 临时文件验证失败，正式文件未被替换；原因：" + exception.Message);
+                }
             }
             return result;
             }
@@ -414,6 +541,8 @@ namespace CodexPortableManager
             bool sandbox,
             bool sandboxEnabled,
             bool localization,
+            bool reasoningDisplay,
+            bool reasoningDisplayEnabled,
             Exception exception)
         {
             if (model) ModelCatalogCompatibility.LogUnavailable(log, modelEnabled, exception);
@@ -422,13 +551,21 @@ namespace CodexPortableManager
                 SafeLog("警告：Windows 沙箱账户名兼容设置与当前 app.asar 不兼容，已保留完整文件。原因：" + exception.Message);
             }
             if (localization) CodexLocalizationCompatibility.LogUnavailable(log, exception);
+            if (reasoningDisplay)
+            {
+                ReasoningDisplayCompatibility.LogUnavailable(
+                    log,
+                    reasoningDisplayEnabled,
+                    exception);
+            }
         }
 
         private static void SetIncludedFailures(
             CompatibilityPlanResult result,
             bool model,
             bool sandbox,
-            bool localization)
+            bool localization,
+            bool reasoningDisplay)
         {
             if (model)
             {
@@ -444,6 +581,12 @@ namespace CodexPortableManager
             {
                 result.LocalizationSucceeded = false;
                 result.LocalizationChange = CompatibilityFeatureChange.Failure("无法读取或分析 app.asar。");
+            }
+            if (reasoningDisplay)
+            {
+                result.ReasoningDisplaySucceeded = false;
+                result.ReasoningDisplayChange = CompatibilityFeatureChange.Failure(
+                    "无法读取或分析 app.asar。");
             }
         }
 

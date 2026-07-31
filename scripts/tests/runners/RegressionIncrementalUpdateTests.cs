@@ -411,7 +411,7 @@ internal static partial class RegressionTestRunner
                 string.Join(",", compatibilityResult.FeatureResults.Select(feature =>
                     feature.FeatureId + "=" + feature.Status).ToArray()),
                 compatibilityStopwatch.Elapsed.TotalSeconds));
-            Assert(stagedRecord.Provenance.CompatibilityFeatures.Count == 3 &&
+            Assert(stagedRecord.Provenance.CompatibilityFeatures.Count == 4 &&
                 stagedHealth.Status == InstallationHealthStatus.Healthy &&
                 !CompatibilityTransaction.Exists(stagingRoot),
                 "真实 staging 兼容设置没有记录完整状态、保持健康或清理事务。");

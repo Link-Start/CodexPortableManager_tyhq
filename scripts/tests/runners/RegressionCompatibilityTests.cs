@@ -281,6 +281,296 @@ internal static partial class RegressionTestRunner
 
     }
 
+    private static void TestReasoningDisplayPatchRoundTrip()
+    {
+        foreach (bool sameEntry in new[] { false, true })
+        {
+            string caseRoot = NewCaseRoot(
+                "reasoning-display-round-trip-" + (sameEntry ? "same" : "split"));
+            string executableRoot = Path.Combine(caseRoot, "app");
+            string resourcesRoot = Path.Combine(executableRoot, "resources");
+            string executablePath = Path.Combine(executableRoot, "Codex.exe");
+            string asarPath = Path.Combine(resourcesRoot, "app.asar");
+            Directory.CreateDirectory(resourcesRoot);
+            File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
+
+            string mapper = BuildOfficialReasoningMapper("format");
+            string layout = BuildOfficialReasoningLayout();
+            byte[] original = BuildReasoningDisplayAsar(mapper, layout, sameEntry);
+            File.WriteAllBytes(asarPath, original);
+
+            Assert(ReasoningDisplayCompatibility.TryConfigure(
+                    executablePath,
+                    true,
+                    delegate { }),
+                "有效模型推理显示指纹没有成功启用补丁。布局=" +
+                (sameEntry ? "同 chunk" : "跨 chunk") + "。");
+            using (AsarSession session = AsarSession.Open(asarPath))
+            {
+                CompatibilityFeatureChange inspection =
+                    ReasoningDisplayCompatibility.Inspect(session);
+                string patched = string.Join(
+                    "\n",
+                    session.Entries
+                        .Where(entry => entry.Path.EndsWith(
+                            ".js",
+                            StringComparison.OrdinalIgnoreCase))
+                        .Select(entry => Encoding.UTF8.GetString(
+                            session.GetEntryData(entry)))
+                        .ToArray());
+                Assert(inspection.Succeeded &&
+                    string.Equals(inspection.After, "Patched", StringComparison.Ordinal) &&
+                    patched.Contains(ReasoningDisplayCompatibility.ContentMarker) &&
+                    patched.Contains(ReasoningDisplayCompatibility.LayoutMarker) &&
+                    patched.Contains(ReasoningDisplayCompatibility.ExpansionMarker),
+                    "模型推理显示启用后没有形成完整的三标记受管状态。");
+                Assert(patched.Contains(
+                        "n.content&&n.content.some(e=>e.trim().length>0)?" +
+                        "`<!--codex-portable-manager:reasoning-display-raw-->\\n`+" +
+                        "n.content.join(`\\n\\n`):format(n.summary)"),
+                    "原始 content 优先、summary 回退的数据策略没有写入映射入口。");
+                Assert(patched.Contains(
+                        ReasoningDisplayCompatibility.LayoutMarker +
+                        "disableMaxHeight:!0,items:"),
+                    "推理卡片没有取消内部固定高度。");
+                Assert(patched.Contains(
+                        ReasoningDisplayCompatibility.ExpansionMarker +
+                        "()=>n.content.startsWith(" +
+                        "`<!--codex-portable-manager:reasoning-display-raw-->`)||!1"),
+                    "原始推理内容没有配置为默认展开并保留可折叠状态。");
+            }
+
+            Assert(ReasoningDisplayCompatibility.TryConfigure(
+                    executablePath,
+                    false,
+                    delegate { }),
+                "模型推理显示补丁没有成功关闭。");
+            Assert(BytesEqual(File.ReadAllBytes(asarPath), original),
+                "模型推理显示补丁关闭后没有字节级恢复官方 ASAR。布局=" +
+                (sameEntry ? "同 chunk" : "跨 chunk") + "。");
+        }
+    }
+
+    private static void TestReasoningDisplayRecipeConstraints()
+    {
+        string caseRoot = NewCaseRoot("reasoning-display-constraints");
+        string executableRoot = Path.Combine(caseRoot, "app");
+        string resourcesRoot = Path.Combine(executableRoot, "resources");
+        string executablePath = Path.Combine(executableRoot, "Codex.exe");
+        string asarPath = Path.Combine(resourcesRoot, "app.asar");
+        Directory.CreateDirectory(resourcesRoot);
+        File.WriteAllBytes(executablePath, new byte[] { 0x4D, 0x5A, 0x01 });
+
+        byte[] unknown = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/reasoning-unknown.js",
+                Encoding.UTF8.GetBytes("const futureReasoning={raw:true};"),
+                0) + "}}",
+            Encoding.UTF8.GetBytes("const futureReasoning={raw:true};"));
+        File.WriteAllBytes(asarPath, unknown);
+        Assert(!ReasoningDisplayCompatibility.TryConfigure(
+                executablePath,
+                true,
+                delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), unknown),
+            "未知模型推理显示结构被错误修改。");
+
+        byte[] mapperOne = Encoding.UTF8.GetBytes(BuildOfficialReasoningMapper("formatOne"));
+        byte[] mapperTwo = Encoding.UTF8.GetBytes(BuildOfficialReasoningMapper("formatTwo"));
+        byte[] layout = Encoding.UTF8.GetBytes(BuildOfficialReasoningLayout());
+        byte[] duplicatePayload = CombineBytes(mapperOne, mapperTwo, layout);
+        string duplicateHeader = "{\"files\":{" +
+            BuildAsarEntryJson(
+                "webview/assets/reasoning-map-one.js",
+                mapperOne,
+                0) + "," +
+            BuildAsarEntryJson(
+                "webview/assets/reasoning-map-two.js",
+                mapperTwo,
+                mapperOne.Length) + "," +
+            BuildAsarEntryJson(
+                "webview/assets/reasoning-layout.js",
+                layout,
+                mapperOne.Length + mapperTwo.Length) + "}}";
+        byte[] duplicate = BuildTestAsar(duplicateHeader, duplicatePayload);
+        File.WriteAllBytes(asarPath, duplicate);
+        Assert(!ReasoningDisplayCompatibility.TryConfigure(
+                executablePath,
+                true,
+                delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), duplicate),
+            "存在两个推理映射候选时仍被当作唯一入口。");
+
+        string managedMapper = BuildOfficialReasoningMapper("format").Replace(
+            "format(n.summary)",
+            ReasoningDisplayCompatibility.ContentMarker +
+                "n.content&&n.content.some(e=>e.trim().length>0)?" +
+                "n.content.join(`\\n\\n`):format(n.summary)");
+        byte[] mixed = BuildReasoningDisplayAsar(
+            managedMapper,
+            BuildOfficialReasoningLayout(),
+            false);
+        File.WriteAllBytes(asarPath, mixed);
+        using (AsarSession session = AsarSession.Open(asarPath))
+        {
+            CompatibilityFeatureChange inspection =
+                ReasoningDisplayCompatibility.Inspect(session);
+            Assert(!inspection.Succeeded &&
+                string.Equals(inspection.After, "Mixed", StringComparison.Ordinal) &&
+                inspection.Status == CompatibilityFeatureStatus.Failed,
+                "仅存在原始内容映射标记的半补丁没有被识别为 Mixed。");
+        }
+        Assert(!ReasoningDisplayCompatibility.TryConfigure(
+                executablePath,
+                false,
+                delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), mixed),
+            "混合状态关闭时错误改写了 ASAR。");
+
+        string legacyMapper = BuildOfficialReasoningMapper("format").Replace(
+            "format(n.summary)",
+            ReasoningDisplayCompatibility.ContentMarker +
+                "n.content&&n.content.some(e=>e.trim().length>0)?" +
+                "n.content.join(`\\n\\n`):format(n.summary)");
+        string legacyLayout = BuildOfficialReasoningLayout().Replace(
+            "{items:",
+            "{" + ReasoningDisplayCompatibility.LayoutMarker +
+                "disableMaxHeight:!0,items:");
+        byte[] legacyPatched = BuildReasoningDisplayAsar(
+            legacyMapper,
+            legacyLayout,
+            false);
+        File.WriteAllBytes(asarPath, legacyPatched);
+        using (AsarSession session = AsarSession.Open(asarPath))
+        {
+            CompatibilityFeatureChange inspection =
+                ReasoningDisplayCompatibility.Inspect(session);
+            Assert(inspection.Succeeded &&
+                string.Equals(
+                    inspection.After,
+                    "PatchedRefreshRequired",
+                    StringComparison.Ordinal),
+                "旧版双标记推理补丁没有进入可升级状态。");
+        }
+        Assert(ReasoningDisplayCompatibility.TryConfigure(
+                executablePath,
+                true,
+                delegate { }),
+            "旧版双标记推理补丁无法原子升级到默认展开配方。");
+        using (AsarSession session = AsarSession.Open(asarPath))
+        {
+            CompatibilityFeatureChange inspection =
+                ReasoningDisplayCompatibility.Inspect(session);
+            Assert(inspection.Succeeded &&
+                string.Equals(inspection.After, "Patched", StringComparison.Ordinal),
+                "旧版推理补丁升级后没有形成当前受管状态。");
+        }
+        Assert(ReasoningDisplayCompatibility.TryConfigure(
+                executablePath,
+                false,
+                delegate { }),
+            "升级后的推理补丁无法恢复官方状态。");
+        byte[] expectedOfficial = BuildReasoningDisplayAsar(
+            BuildOfficialReasoningMapper("format"),
+            BuildOfficialReasoningLayout(),
+            false);
+        Assert(BytesEqual(File.ReadAllBytes(asarPath), expectedOfficial),
+            "旧版推理补丁升级并关闭后没有恢复官方 ASAR 字节。");
+
+        byte[] modelOnlyPayload = Encoding.UTF8.GetBytes(
+            "const settings={available_models:[]};" +
+            "function filter({availableModels:n},r){return u?n.has(r.model):!r.hidden;}");
+        byte[] modelOnly = BuildTestAsar(
+            "{\"files\":{" + BuildAsarEntryJson(
+                "webview/assets/model-without-reasoning-display.js",
+                modelOnlyPayload,
+                0) + "}}",
+            modelOnlyPayload);
+        File.WriteAllBytes(asarPath, modelOnly);
+        CompatibilityOptions inherited = new CompatibilityOptions(
+            false,
+            true,
+            false,
+            false,
+            true);
+        CompatibilityPlanResult partial = new CompatibilityPlan(delegate { })
+            .Apply(executablePath, inherited);
+        Assert(partial.ModelCatalogSucceeded &&
+            !partial.ReasoningDisplaySucceeded &&
+            partial.ReasoningDisplayChange.Status ==
+                CompatibilityFeatureStatus.Unsupported &&
+            Encoding.UTF8.GetString(File.ReadAllBytes(asarPath)).Contains(
+                ModelCatalogCompatibility.PatchedMarker),
+            "推理显示不支持且未改写文件时错误阻断了独立模型补丁。");
+        Assert(new CompatibilityPlan(delegate { }).Apply(
+                executablePath,
+                new CompatibilityOptions(false, false, false, false, false))
+                .ModelCatalogSucceeded &&
+            BytesEqual(File.ReadAllBytes(asarPath), modelOnly),
+            "独立成功的模型补丁在部分失败后无法恢复。");
+
+        CompatibilityResult staging = new CompatibilityCoordinator(delegate { })
+            .ApplyOfficialStaging(executablePath, inherited);
+        Assert(staging.AllSucceeded &&
+            staging.ReasoningDisplay.Status == CompatibilityFeatureStatus.NotRequired &&
+            staging.ReasoningDisplay.After == "Official",
+            "更新继承遇到未知推理显示结构时没有仅把该功能归一为关闭。");
+        Assert(new CompatibilityCoordinator(delegate { }).Apply(
+                executablePath,
+                new CompatibilityOptions(false, false, false, false, false))
+                .ModelCatalogSucceeded &&
+            BytesEqual(File.ReadAllBytes(asarPath), modelOnly),
+            "staging 降级后的独立模型补丁无法恢复官方字节。");
+    }
+
+    private static string BuildOfficialReasoningMapper(string formatter)
+    {
+        return "function map(turn){let out=[];for(let n of turn.items){" +
+            "switch(n.type){case`reasoning`:{let r=true,i=" + formatter +
+            "(n.summary);if(i.length>0){let item={type:`reasoning`,content:i," +
+            "completed:!r};out.push(item)}break}}}return out}";
+    }
+
+    private static string BuildOfficialReasoningLayout()
+    {
+        return "function view(e){let{item:n}=e,[f,p]=(0,H.useState)(!1);" +
+            "const reasoningView=jsx(Component,{items:[{key:`reasoning-markdown`," +
+            "node:markdown}],autoScrollToBottom:streaming,contentClassName:`gap-0`," +
+            "maxHeightByState:{preview:`8.75rem`,expanded:`8.75rem`,collapsed:`0px`}," +
+            "viewState:`expanded`,className:`fade`});return reasoningView}";
+    }
+
+    private static byte[] BuildReasoningDisplayAsar(
+        string mapper,
+        string layout,
+        bool sameEntry)
+    {
+        if (sameEntry)
+        {
+            byte[] combined = Encoding.UTF8.GetBytes(mapper + layout);
+            return BuildTestAsar(
+                "{\"files\":{" + BuildAsarEntryJson(
+                    "webview/assets/reasoning-combined.js",
+                    combined,
+                    0) + "}}",
+                combined);
+        }
+
+        byte[] mapperBytes = Encoding.UTF8.GetBytes(mapper);
+        byte[] layoutBytes = Encoding.UTF8.GetBytes(layout);
+        return BuildTestAsar(
+            "{\"files\":{" +
+            BuildAsarEntryJson(
+                "webview/assets/reasoning-mapper.js",
+                mapperBytes,
+                0) + "," +
+            BuildAsarEntryJson(
+                "webview/assets/reasoning-layout.js",
+                layoutBytes,
+                mapperBytes.Length) + "}}",
+            CombineBytes(mapperBytes, layoutBytes));
+    }
+
     private static string DescribeCompatibilityResult(CompatibilityResult result)
     {
         if (result == null) return "结果=null；";
@@ -1512,7 +1802,7 @@ internal static partial class RegressionTestRunner
             officialBaseline);
         InstallationRecord officialRecord = InstallOwnership.ReadInstallationRecord(officialRoot);
         Assert(officialApplyCalls == 0 && officialResult.TransactionCommitted &&
-            officialRecord.Provenance.CompatibilityFeatures.Count == 3,
+            officialRecord.Provenance.CompatibilityFeatures.Count == 4,
             "全关闭设置没有直接登记完整官方状态，或仍执行了兼容变换。");
 
         string successRoot = Path.Combine(NewCaseRoot("staging-compatibility-success"), "staging");
@@ -1604,6 +1894,7 @@ internal static partial class RegressionTestRunner
                     ModelCatalogSucceeded = false,
                     SandboxSucceeded = false,
                     LocalizationSucceeded = true,
+                    ReasoningDisplaySucceeded = true,
                     ModelCatalog = new CompatibilityFeatureResult
                     {
                         FeatureId = "ModelCatalog",
@@ -1638,7 +1929,12 @@ internal static partial class RegressionTestRunner
                         Changed = true,
                         Status = CompatibilityFeatureStatus.Applied,
                         RecipeId = CodexLocalizationCompatibility.RecipeId
-                    }
+                    },
+                    ReasoningDisplay = CreateAlreadySatisfiedFeature(
+                        "ReasoningDisplay",
+                        "模型推理显示",
+                        "Official",
+                        ReasoningDisplayCompatibility.RecipeId)
                 };
             },
             InstallOwnership.WriteMarker,
@@ -1675,6 +1971,7 @@ internal static partial class RegressionTestRunner
                     ModelCatalogSucceeded = false,
                     SandboxSucceeded = true,
                     LocalizationSucceeded = true,
+                    ReasoningDisplaySucceeded = true,
                     ModelCatalog = new CompatibilityFeatureResult
                     {
                         FeatureId = "ModelCatalog",
@@ -1699,7 +1996,12 @@ internal static partial class RegressionTestRunner
                         Changed = true,
                         Status = CompatibilityFeatureStatus.Applied,
                         RecipeId = CodexLocalizationCompatibility.RecipeId
-                    }
+                    },
+                    ReasoningDisplay = CreateAlreadySatisfiedFeature(
+                        "ReasoningDisplay",
+                        "模型推理显示",
+                        "Official",
+                        ReasoningDisplayCompatibility.RecipeId)
                 };
             },
             InstallOwnership.WriteMarker,
@@ -1757,6 +2059,7 @@ internal static partial class RegressionTestRunner
             ModelCatalogSucceeded = true,
             SandboxSucceeded = succeed,
             LocalizationSucceeded = true,
+            ReasoningDisplaySucceeded = true,
             ModelCatalog = new CompatibilityFeatureResult
             {
                 FeatureId = "ModelCatalog",
@@ -1786,7 +2089,12 @@ internal static partial class RegressionTestRunner
                 "Localization",
                 "界面语言",
                 "Menus=Official;Reasoning=Official",
-                CodexLocalizationCompatibility.RecipeId)
+                CodexLocalizationCompatibility.RecipeId),
+            ReasoningDisplay = CreateAlreadySatisfiedFeature(
+                "ReasoningDisplay",
+                "模型推理显示",
+                "Official",
+                ReasoningDisplayCompatibility.RecipeId)
         };
     }
 
@@ -2085,7 +2393,7 @@ internal static partial class RegressionTestRunner
 
         CompatibilityOverview inspected = CompatibilityStatusReader.Read(installRoot, false);
         Assert(inspected.State == CompatibilityOverviewState.Inspected &&
-            inspected.Features.Count == 3 &&
+            inspected.Features.Count == 4 &&
             inspected.Features.All(feature => feature.RecipeCurrent),
             "启动时没有直接检查当前文件的逐功能状态。");
 
@@ -2102,7 +2410,7 @@ internal static partial class RegressionTestRunner
         InstallOwnership.WriteMarker(installRoot, installId, "1.2.3.4", record.Provenance);
         CompatibilityOverview markerDisagrees = CompatibilityStatusReader.Read(installRoot, false);
         Assert(markerDisagrees.State == CompatibilityOverviewState.Inspected &&
-            markerDisagrees.Features.Count == 3 &&
+            markerDisagrees.Features.Count == 4 &&
             markerDisagrees.Features.All(feature => feature.RecipeCurrent) &&
             !string.Equals(
                 markerDisagrees.Features.Single(feature =>
@@ -2138,7 +2446,7 @@ internal static partial class RegressionTestRunner
                 unmanagedEntry));
         CompatibilityOverview unmanaged = CompatibilityStatusReader.Read(unmanagedRoot, false);
         Assert(unmanaged.State == CompatibilityOverviewState.Inspected &&
-            unmanaged.Features.Count == 3 &&
+            unmanaged.Features.Count == 4 &&
             unmanaged.Features.All(feature => feature.RecipeCurrent) &&
             unmanaged.Features.Single(feature => feature.FeatureId == "ModelCatalog").After == "Official",
             "缺少来源记录的安装没有主动读取逐功能状态。");
@@ -2168,7 +2476,7 @@ internal static partial class RegressionTestRunner
 
         CompatibilityOverview overview = CompatibilityStatusReader.Read(installRoot, false);
         Assert(overview.State == CompatibilityOverviewState.Inspected &&
-            overview.Features.Count == 3 &&
+            overview.Features.Count == 4 &&
             overview.Features.All(feature => feature.RecipeCurrent),
             "未知官方结构没有返回完整的现场状态。");
         CompatibilityObservedFeature sandbox = overview.Features.Single(feature =>
@@ -2187,7 +2495,8 @@ internal static partial class RegressionTestRunner
         CompatibilitySwitchFacts unsupportedFacts =
             CompatibilityStatusReader.ResolveSwitchFacts(overview);
         Assert(!unsupportedFacts.SandboxCompatibilityEnabled.HasValue &&
-            !unsupportedFacts.UnlockModelCatalogEnabled.HasValue,
+            !unsupportedFacts.UnlockModelCatalogEnabled.HasValue &&
+            !unsupportedFacts.ReasoningDisplayEnabled.HasValue,
             "当前版本不可用的功能仍被解析为可点击开关。");
 
         CompatibilityOptions resolved = CompatibilityStatusReader.ResolveOptions(overview);
@@ -2210,9 +2519,19 @@ internal static partial class RegressionTestRunner
                     null, "model", true),
                 new CompatibilityObservedFeature(
                     "Localization", "Menus=Patched;Reasoning=Official",
-                    CompatibilityFeatureStatus.AlreadySatisfied, null, "localization", true)
+                    CompatibilityFeatureStatus.AlreadySatisfied, null, "localization", true),
+                new CompatibilityObservedFeature(
+                    "ReasoningDisplay", "Patched",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    ReasoningDisplayCompatibility.RecipeId, true)
             },
-            new[] { "SandboxCompatibility", "ModelCatalog", "Localization" },
+            new[]
+            {
+                "SandboxCompatibility",
+                "ModelCatalog",
+                "Localization",
+                "ReasoningDisplay"
+            },
             true);
 
         Assert(MainWindow.ResolveSimpleCompatibilityState(
@@ -2225,6 +2544,9 @@ internal static partial class RegressionTestRunner
             "中文菜单开关没有采用实际补丁状态。");
         Assert(MainWindow.ResolveLocalizationCompatibilityState(observed, "Reasoning") == false,
             "推理英文开关没有采用实际官方状态。");
+        Assert(MainWindow.ResolveSimpleCompatibilityState(
+            observed, "ReasoningDisplay", "Patched", "Official") == true,
+            "完整推理显示开关没有采用实际补丁状态。");
 
         Assert(MainWindow.CanInitializeCompatibilitySwitch(observed, "ModelCatalog"),
             "健康且配方有效的识别结果不能用于首次初始化兼容开关。");
@@ -2237,8 +2559,66 @@ internal static partial class RegressionTestRunner
             initialized.SandboxCompatibilityEnabled &&
             initialized.UnlockModelCatalogEnabled &&
             initialized.SupplementChineseUiEnabled &&
-            !initialized.EnglishTechnicalParametersEnabled,
-            "首次识别没有把四项实际状态完整映射为兼容开关。");
+            !initialized.EnglishTechnicalParametersEnabled &&
+            initialized.ReasoningDisplayEnabled,
+            "首次识别没有把五项实际状态完整映射为兼容开关。");
+
+        CompatibilityOverview reasoningRefresh = new CompatibilityOverview(
+            CompatibilityOverviewState.Inspected,
+            "reasoning-refresh",
+            observed.Features.Select(feature => string.Equals(
+                    feature.FeatureId,
+                    "ReasoningDisplay",
+                    StringComparison.Ordinal)
+                ? new CompatibilityObservedFeature(
+                    "ReasoningDisplay",
+                    "PatchedRefreshRequired",
+                    CompatibilityFeatureStatus.AlreadySatisfied,
+                    null,
+                    ReasoningDisplayCompatibility.RecipeId,
+                    true)
+                : feature).ToArray(),
+            observed.AppliedFeatures,
+            true);
+        CompatibilitySwitchFacts reasoningRefreshFacts =
+            CompatibilityStatusReader.ResolveSwitchFacts(reasoningRefresh);
+        Assert(reasoningRefreshFacts.ReasoningDisplayEnabled == true &&
+            reasoningRefreshFacts.ReasoningDisplayNeedsRefresh,
+            "旧版推理显示补丁没有保持开启状态并请求刷新当前配方。");
+
+        CompatibilityOverview unsupportedReasoningDisplay = new CompatibilityOverview(
+            CompatibilityOverviewState.Inspected,
+            "reasoning-display-unsupported",
+            new[]
+            {
+                new CompatibilityObservedFeature(
+                    "SandboxCompatibility", "Disabled",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    CompatibilityCoordinator.SandboxRecipeId, true),
+                new CompatibilityObservedFeature(
+                    "ModelCatalog", "Official",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    ModelCatalogCompatibility.RecipeId, true),
+                new CompatibilityObservedFeature(
+                    "Localization", "Menus=Official;Reasoning=Official",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    CodexLocalizationCompatibility.RecipeId, true),
+                new CompatibilityObservedFeature(
+                    "ReasoningDisplay", "Official",
+                    CompatibilityFeatureStatus.Unsupported,
+                    "当前版本没有推理显示入口。",
+                    ReasoningDisplayCompatibility.RecipeId, true)
+            },
+            new string[0],
+            true);
+        CompatibilitySwitchFacts unsupportedReasoningFacts =
+            CompatibilityStatusReader.ResolveSwitchFacts(unsupportedReasoningDisplay);
+        CompatibilityOptions inheritedUnsupportedReasoning =
+            CompatibilityStatusReader.ResolveOptions(unsupportedReasoningDisplay);
+        Assert(!unsupportedReasoningFacts.ReasoningDisplayEnabled.HasValue &&
+            inheritedUnsupportedReasoning != null &&
+            !inheritedUnsupportedReasoning.ReasoningDisplayEnabled,
+            "不支持的官方推理显示结构没有在 UI 中禁用，或更新继承时未安全归一为关闭。");
 
         CompatibilityOverview partiallyFailed = new CompatibilityOverview(
             CompatibilityOverviewState.Inspected,
@@ -2254,7 +2634,11 @@ internal static partial class RegressionTestRunner
                 new CompatibilityObservedFeature(
                     "Localization", "Menus=Mixed;Reasoning=Official",
                     CompatibilityFeatureStatus.Failed, "本地化文件状态异常",
-                    CodexLocalizationCompatibility.RecipeId, true)
+                    CodexLocalizationCompatibility.RecipeId, true),
+                new CompatibilityObservedFeature(
+                    "ReasoningDisplay", "Official",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    ReasoningDisplayCompatibility.RecipeId, true)
             },
             new[] { "ModelCatalog" },
             true);
@@ -2264,7 +2648,8 @@ internal static partial class RegressionTestRunner
             partialFacts.UnlockModelCatalogEnabled == true,
             "一个兼容功能异常时错误丢弃了其他功能的可确认事实状态。");
         Assert(!partialFacts.SupplementChineseUiEnabled.HasValue &&
-            !partialFacts.EnglishTechnicalParametersEnabled.HasValue,
+            !partialFacts.EnglishTechnicalParametersEnabled.HasValue &&
+            partialFacts.ReasoningDisplayEnabled == false,
             "异常的界面语言功能仍被解析为可点击开关。");
         Assert(MainWindow.ResolveCompatibilityOptionsForInitialization(partiallyFailed) == null,
             "存在异常项时仍生成了可整体应用的完整兼容选项。");
@@ -2303,7 +2688,11 @@ internal static partial class RegressionTestRunner
                 new CompatibilityObservedFeature(
                     "Localization", "Menus=Official;Reasoning=NotManaged",
                     CompatibilityFeatureStatus.AlreadySatisfied, null,
-                    CodexLocalizationCompatibility.RecipeId, true)
+                    CodexLocalizationCompatibility.RecipeId, true),
+                new CompatibilityObservedFeature(
+                    "ReasoningDisplay", "Official",
+                    CompatibilityFeatureStatus.AlreadySatisfied, null,
+                    ReasoningDisplayCompatibility.RecipeId, true)
             },
             new string[0],
             true);
@@ -2463,6 +2852,8 @@ internal static partial class RegressionTestRunner
                 (System.Windows.Controls.CheckBox)window.FindName("supplementChineseUiCheckBox");
             System.Windows.Controls.CheckBox english =
                 (System.Windows.Controls.CheckBox)window.FindName("englishTechnicalParametersCheckBox");
+            System.Windows.Controls.CheckBox reasoningDisplay =
+                (System.Windows.Controls.CheckBox)window.FindName("reasoningDisplayCheckBox");
             Assert(sandbox.IsChecked == false && sandbox.IsEnabled,
                 "可确认关闭的沙箱开关没有按事实显示或被错误禁用。");
             Assert(model.IsChecked == true && model.IsEnabled,
@@ -2470,6 +2861,8 @@ internal static partial class RegressionTestRunner
             Assert(chinese.IsChecked == false && !chinese.IsEnabled &&
                 english.IsChecked == false && !english.IsEnabled,
                 "异常界面语言开关没有默认关闭并禁止点击。");
+            Assert(reasoningDisplay.IsChecked == false && reasoningDisplay.IsEnabled,
+                "可确认关闭的完整推理显示开关没有按事实显示。");
 
             sandbox.IsChecked = true;
             chinese.IsChecked = true;
@@ -2477,7 +2870,8 @@ internal static partial class RegressionTestRunner
                 (OperationSnapshot)captureApplySnapshot.Invoke(window, null);
             Assert(applySnapshot.Compatibility.ManageSandboxCompatibility &&
                 !applySnapshot.Compatibility.ManageModelCatalog &&
-                !applySnapshot.Compatibility.ManageLocalization,
+                !applySnapshot.Compatibility.ManageLocalization &&
+                !applySnapshot.Compatibility.ManageReasoningDisplay,
                 "只修改沙箱时仍把未改动模型或异常界面语言纳入应用事务。");
 
             sandbox.IsChecked = false;
@@ -2508,7 +2902,11 @@ internal static partial class RegressionTestRunner
                     new CompatibilityObservedFeature(
                         "Localization", "Menus=Official;Reasoning=Official",
                         CompatibilityFeatureStatus.AlreadySatisfied, null,
-                        CodexLocalizationCompatibility.RecipeId, true)
+                        CodexLocalizationCompatibility.RecipeId, true),
+                    new CompatibilityObservedFeature(
+                        "ReasoningDisplay", "Official",
+                        CompatibilityFeatureStatus.AlreadySatisfied, null,
+                        ReasoningDisplayCompatibility.RecipeId, true)
                 },
                 new string[0],
                 true);
@@ -2543,6 +2941,7 @@ internal static partial class RegressionTestRunner
             Assert(
                 ((System.Windows.Controls.CheckBox)window.FindName("sandboxCompatibilityCheckBox")).IsChecked == false &&
                 ((System.Windows.Controls.CheckBox)window.FindName("unlockModelCatalogCheckBox")).IsChecked == false &&
+                ((System.Windows.Controls.CheckBox)window.FindName("reasoningDisplayCheckBox")).IsChecked == false &&
                 ((System.Windows.Controls.CheckBox)window.FindName("supplementChineseUiCheckBox")).IsChecked == false &&
                 ((System.Windows.Controls.CheckBox)window.FindName("englishTechnicalParametersCheckBox")).IsChecked == false,
                 "窗口启动时仍显示上次保存的兼容选择，而不是等待读取当前文件。");
@@ -2563,6 +2962,7 @@ internal static partial class RegressionTestRunner
             {
                 "sandboxCompatibilityDescriptionLabel",
                 "modelCatalogDescriptionLabel",
+                "reasoningDisplayDescriptionLabel",
                 "chineseUiDescriptionLabel",
                 "englishParametersDescriptionLabel"
             };
@@ -2570,6 +2970,7 @@ internal static partial class RegressionTestRunner
             {
                 "sandboxCompatibilityCheckBox",
                 "unlockModelCatalogCheckBox",
+                "reasoningDisplayCheckBox",
                 "supplementChineseUiCheckBox",
                 "englishTechnicalParametersCheckBox"
             };
@@ -2577,6 +2978,7 @@ internal static partial class RegressionTestRunner
             {
                 new[] { "检测 Windows 对当前用户名的 SID 解析", "补全“账户域\\用户名”", "官方沙箱初始化程序使用当前登录用户" },
                 new[] { "本地白名单过滤", "DeepSeek", "外部模型显示在模型列表中" },
+                new[] { "原始推理内容", "内部固定高度", "官方摘要" },
                 new[] { "文件、编辑、视图、帮助", "托盘右键菜单", "打开 Codex", "退出" },
                 new[] { "推理强度名称固定显示为官方英文" }
             };
@@ -3571,6 +3973,79 @@ internal static partial class RegressionTestRunner
                 root.Remove("BackupDirectoryIdentity");
             },
             null);
+        AssertCompatibilityJournalShapeRejected(
+            "schema-version",
+            delegate(IDictionary<string, object> root)
+            {
+                root["SchemaVersion"] = 1;
+            },
+            null);
+        AssertCompatibilityJournalShapeRejected(
+            "schema-coerced",
+            delegate(IDictionary<string, object> root)
+            {
+                root["SchemaVersion"] = "2";
+            },
+            null);
+        AssertCompatibilityJournalShapeRejected(
+            "reasoning-enabled",
+            delegate(IDictionary<string, object> root)
+            {
+                (root["TargetOptions"] as IDictionary<string, object>)
+                    .Remove("ReasoningDisplayEnabled");
+            },
+            null);
+        AssertCompatibilityJournalShapeRejected(
+            "reasoning-manage",
+            delegate(IDictionary<string, object> root)
+            {
+                (root["TargetOptions"] as IDictionary<string, object>)
+                    .Remove("ManageReasoningDisplay");
+            },
+            null);
+    }
+
+    private static void TestLegacyCompatibilityJournalRecovery()
+    {
+        string caseRoot = NewCaseRoot("compatibility-legacy-journal");
+        string installRoot = Path.Combine(caseRoot, "CodexDesktop");
+        string installId = Guid.NewGuid().ToString("N");
+        CreateHealthyCompatibilityInstallation(installRoot, installId, "1.2.3.4");
+        string asarPath = Path.Combine(installRoot, "app", "resources", "app.asar");
+        string journalPath = CompatibilityTransaction.GetJournalPath(installRoot);
+        byte[] originalAsar = File.ReadAllBytes(asarPath);
+
+        CompatibilityTransaction transaction = CompatibilityTransaction.Begin(
+            installRoot,
+            installId,
+            CreateCompatibilityOptions(false, true, false, false),
+            new[] { "app/resources/app.asar" });
+        transaction.BeginMutation();
+        File.AppendAllText(asarPath, "legacy-interrupted-change", Encoding.ASCII);
+        transaction.CaptureChanges();
+
+        JavaScriptSerializer serializer = new JavaScriptSerializer();
+        IDictionary<string, object> root = serializer.DeserializeObject(
+            File.ReadAllText(journalPath, Encoding.UTF8)) as IDictionary<string, object>;
+        IDictionary<string, object> options = root == null
+            ? null
+            : root["TargetOptions"] as IDictionary<string, object>;
+        Assert(root != null && options != null,
+            "测试无法读取待降级的兼容 journal。");
+        root.Remove("SchemaVersion");
+        options.Remove("ReasoningDisplayEnabled");
+        options.Remove("ManageReasoningDisplay");
+        File.WriteAllText(
+            journalPath,
+            serializer.Serialize(root),
+            new UTF8Encoding(false));
+
+        Assert(CompatibilityTransaction.RecoverPending(
+                installRoot,
+                delegate { }) &&
+            BytesEqual(File.ReadAllBytes(asarPath), originalAsar) &&
+            !CompatibilityTransaction.Exists(installRoot),
+            "升级后的管理器没有严格识别并恢复旧七字段兼容 journal。");
     }
 
     private static void AssertCompatibilityJournalShapeRejected(
@@ -3664,7 +4139,7 @@ internal static partial class RegressionTestRunner
         Assert(!ArtifactHash.FixedTimeEquals(afterCodex.Sha256, ArtifactHash.ComputeSha256(codexPath)),
             "测试注入的无关 codex.exe 变化没有保留为可检测篡改。");
         Assert(after.Provenance.CompatibilityFeatures != null &&
-            after.Provenance.CompatibilityFeatures.Count == 3 &&
+            after.Provenance.CompatibilityFeatures.Count == 4 &&
             after.Provenance.CompatibilityFeatures.Any(feature =>
                 feature.FeatureId == "ModelCatalog" &&
                 feature.RecipeId == ModelCatalogCompatibility.RecipeId),
@@ -3807,6 +4282,7 @@ internal static partial class RegressionTestRunner
             ModelCatalogSucceeded = true,
             SandboxSucceeded = true,
             LocalizationSucceeded = true,
+            ReasoningDisplaySucceeded = true,
             ModelCatalog = CreateAlreadySatisfiedFeature(
                 "ModelCatalog",
                 "模型目录",
@@ -3821,7 +4297,12 @@ internal static partial class RegressionTestRunner
                 "Localization",
                 "界面语言",
                 "Menus=Official;Reasoning=Official",
-                CodexLocalizationCompatibility.RecipeId)
+                CodexLocalizationCompatibility.RecipeId),
+            ReasoningDisplay = CreateAlreadySatisfiedFeature(
+                "ReasoningDisplay",
+                "模型推理显示",
+                "Official",
+                ReasoningDisplayCompatibility.RecipeId)
         };
     }
 

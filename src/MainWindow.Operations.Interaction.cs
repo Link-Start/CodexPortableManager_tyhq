@@ -124,6 +124,7 @@ namespace CodexPortableManager
             {
                 sandboxCompatibilityCheckBox.IsChecked = compatibility.SandboxCompatibilityEnabled;
                 unlockModelCatalogCheckBox.IsChecked = compatibility.UnlockModelCatalogEnabled;
+                reasoningDisplayCheckBox.IsChecked = compatibility.ReasoningDisplayEnabled;
                 supplementChineseUiCheckBox.IsChecked = compatibility.SupplementChineseUiEnabled;
                 englishTechnicalParametersCheckBox.IsChecked = compatibility.EnglishTechnicalParametersEnabled;
             }
@@ -353,7 +354,15 @@ namespace CodexPortableManager
             catch { }
         }
 
-        private OperationSnapshot CaptureOperationSnapshot() => new OperationSnapshot(Environment.ExpandEnvironmentVariables(installPathTextBox.Text.Trim()), sandboxCompatibilityCheckBox.IsChecked == true, unlockModelCatalogCheckBox.IsChecked == true, supplementChineseUiCheckBox.IsChecked == true, englishTechnicalParametersCheckBox.IsChecked == true, installPathRevision);
+        private OperationSnapshot CaptureOperationSnapshot() => new OperationSnapshot(
+            Environment.ExpandEnvironmentVariables(installPathTextBox.Text.Trim()),
+            new CompatibilityOptions(
+                sandboxCompatibilityCheckBox.IsChecked == true,
+                unlockModelCatalogCheckBox.IsChecked == true,
+                supplementChineseUiCheckBox.IsChecked == true,
+                englishTechnicalParametersCheckBox.IsChecked == true,
+                reasoningDisplayCheckBox.IsChecked == true),
+            installPathRevision);
 
         private OperationSnapshot CaptureCompatibilityApplySnapshot()
         {
@@ -364,6 +373,7 @@ namespace CodexPortableManager
             bool modelEnabled = unlockModelCatalogCheckBox.IsChecked == true;
             bool chineseEnabled = supplementChineseUiCheckBox.IsChecked == true;
             bool englishEnabled = englishTechnicalParametersCheckBox.IsChecked == true;
+            bool reasoningDisplayEnabled = reasoningDisplayCheckBox.IsChecked == true;
             bool manageSandbox = facts.SandboxCompatibilityEnabled.HasValue &&
                 facts.SandboxCompatibilityEnabled.Value != sandboxEnabled;
             bool manageModel = facts.UnlockModelCatalogEnabled.HasValue &&
@@ -373,16 +383,22 @@ namespace CodexPortableManager
                 (facts.LocalizationNeedsRefresh ||
                  facts.SupplementChineseUiEnabled.Value != chineseEnabled ||
                  facts.EnglishTechnicalParametersEnabled.Value != englishEnabled);
+            bool manageReasoningDisplay = facts.ReasoningDisplayEnabled.HasValue &&
+                (facts.ReasoningDisplayNeedsRefresh && reasoningDisplayEnabled ||
+                 facts.ReasoningDisplayEnabled.Value != reasoningDisplayEnabled);
             return new OperationSnapshot(
                 Environment.ExpandEnvironmentVariables(installPathTextBox.Text.Trim()),
-                sandboxEnabled,
-                modelEnabled,
-                chineseEnabled,
-                englishEnabled,
-                installPathRevision,
-                manageSandbox,
-                manageModel,
-                manageLocalization);
+                new CompatibilityOptions(
+                    sandboxEnabled,
+                    modelEnabled,
+                    chineseEnabled,
+                    englishEnabled,
+                    reasoningDisplayEnabled,
+                    manageSandbox,
+                    manageModel,
+                    manageLocalization,
+                    manageReasoningDisplay),
+                installPathRevision);
         }
 
         private void MainWindow_Closing(object sender, CancelEventArgs args)

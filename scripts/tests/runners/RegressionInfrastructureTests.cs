@@ -529,7 +529,9 @@ internal static partial class RegressionTestRunner
                 false,
                 true,
                 false,
-                true);
+                true,
+                true,
+                false);
             UiState enabled = UiState.Create(new UiStateInput(
                 idle,
                 true,
@@ -548,7 +550,8 @@ internal static partial class RegressionTestRunner
                 enabled.SandboxCompatibilityEnabled &&
                 enabled.UnlockModelCatalogEnabled &&
                 enabled.SupplementChineseUiEnabled &&
-                enabled.EnglishTechnicalParametersEnabled,
+                enabled.EnglishTechnicalParametersEnabled &&
+                enabled.ReasoningDisplayEnabled,
                 "UiState 没有统一开放可用的命令和兼容开关。");
 
             UiState backgroundCleanup = UiState.Create(new UiStateInput(
@@ -577,12 +580,19 @@ internal static partial class RegressionTestRunner
                 false,
                 false,
                 true,
-                new CompatibilitySwitchFacts(false, null, null, true),
+                new CompatibilitySwitchFacts(
+                    false,
+                    null,
+                    null,
+                    true,
+                    null,
+                    false),
                 false));
             Assert(unknownCompatibility.SandboxCompatibilityEnabled &&
                 !unknownCompatibility.UnlockModelCatalogEnabled &&
                 !unknownCompatibility.SupplementChineseUiEnabled &&
                 unknownCompatibility.EnglishTechnicalParametersEnabled &&
+                !unknownCompatibility.ReasoningDisplayEnabled &&
                 !unknownCompatibility.ApplyCompatibilityEnabled &&
                 unknownCompatibility.CheckCompatibilityStatusEnabled,
                 "UiState 没有按现场事实独立控制兼容开关和应用命令。");

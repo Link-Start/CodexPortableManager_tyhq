@@ -79,6 +79,7 @@ namespace CodexPortableManager
             installPathTextBox.Text = managerSettings.InstallRoot;
             sandboxCompatibilityCheckBox.IsChecked = false;
             unlockModelCatalogCheckBox.IsChecked = false;
+            reasoningDisplayCheckBox.IsChecked = false;
             supplementChineseUiCheckBox.IsChecked = false;
             englishTechnicalParametersCheckBox.IsChecked = false;
 
@@ -157,6 +158,8 @@ namespace CodexPortableManager
             sandboxCompatibilityCheckBox.Unchecked += SettingsCheckBox_Changed;
             unlockModelCatalogCheckBox.Checked += SettingsCheckBox_Changed;
             unlockModelCatalogCheckBox.Unchecked += SettingsCheckBox_Changed;
+            reasoningDisplayCheckBox.Checked += SettingsCheckBox_Changed;
+            reasoningDisplayCheckBox.Unchecked += SettingsCheckBox_Changed;
             supplementChineseUiCheckBox.Checked += SettingsCheckBox_Changed;
             supplementChineseUiCheckBox.Unchecked += SettingsCheckBox_Changed;
             englishTechnicalParametersCheckBox.Checked += SettingsCheckBox_Changed;

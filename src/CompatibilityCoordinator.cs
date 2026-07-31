@@ -64,9 +64,11 @@ namespace CodexPortableManager
                 compatibility.UnlockModelCatalogEnabled,
                 compatibility.SupplementChineseUiEnabled,
                 compatibility.EnglishTechnicalParametersEnabled,
+                compatibility.ReasoningDisplayEnabled,
                 compatibility.ManageSandboxCompatibility,
                 compatibility.ManageModelCatalog,
-                compatibility.ManageLocalization);
+                compatibility.ManageLocalization,
+                compatibility.ManageReasoningDisplay);
             CompatibilityPlanResult asar = new CompatibilityPlan(log).Apply(
                 executablePath,
                 effective,
@@ -93,6 +95,7 @@ namespace CodexPortableManager
                 ModelCatalogSucceeded = asar.ModelCatalogSucceeded,
                 SandboxSucceeded = asar.SandboxSucceeded,
                 LocalizationSucceeded = asar.LocalizationSucceeded,
+                ReasoningDisplaySucceeded = asar.ReasoningDisplaySucceeded,
                 ModelCatalog = BuildPlanFeature(
                     asar.ModelCatalogChange,
                     asar.ModelCatalogSucceeded,
@@ -112,7 +115,18 @@ namespace CodexPortableManager
                         ? "Menus=" + (compatibility.SupplementChineseUiEnabled ? "Patched" : "Official") +
                           ";Reasoning=" + (compatibility.EnglishTechnicalParametersEnabled ? "Patched" : "Official")
                         : "Menus=NotManaged;Reasoning=NotManaged",
-                    CodexLocalizationCompatibility.RecipeId)
+                    CodexLocalizationCompatibility.RecipeId),
+                ReasoningDisplay = BuildPlanFeature(
+                    asar.ReasoningDisplayChange,
+                    asar.ReasoningDisplaySucceeded,
+                    ReasoningDisplayCompatibility.FeatureId,
+                    "模型推理显示",
+                    compatibility.ManageReasoningDisplay
+                        ? compatibility.ReasoningDisplayEnabled
+                            ? "Patched"
+                            : "Official"
+                        : "NotManaged",
+                    ReasoningDisplayCompatibility.RecipeId)
             };
             if (!result.AllSucceeded)
             {

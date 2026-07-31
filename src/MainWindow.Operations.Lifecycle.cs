@@ -430,6 +430,7 @@ namespace CodexPortableManager
                 state.InputEnabled;
             sandboxCompatibilityCheckBox.IsEnabled = state.SandboxCompatibilityEnabled;
             unlockModelCatalogCheckBox.IsEnabled = state.UnlockModelCatalogEnabled;
+            reasoningDisplayCheckBox.IsEnabled = state.ReasoningDisplayEnabled;
             supplementChineseUiCheckBox.IsEnabled = state.SupplementChineseUiEnabled;
             englishTechnicalParametersCheckBox.IsEnabled = state.EnglishTechnicalParametersEnabled;
             checkButton.IsEnabled = state.CheckEnabled;

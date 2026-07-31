@@ -79,6 +79,14 @@ namespace CodexPortableManager
                 return;
             }
 
+            if (EqualsCommand(command, "--reasoning-display-package-test"))
+            {
+                Environment.ExitCode = CompatibilityPackageTestRunner.RunReasoningDisplay(
+                    GetArgument(args, 1, Path.Combine(Path.GetTempPath(), "CodexPortableManager-reasoning-display-package.txt")),
+                    GetArgument(args, 2, Path.Combine(GetDefaultFixtureRoot(), "app", "resources", "app.asar")));
+                return;
+            }
+
             if (EqualsCommand(command, "--pipeline-test"))
             {
                 Environment.ExitCode = PipelineTestRunner.Run(

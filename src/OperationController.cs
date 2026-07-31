@@ -19,7 +19,28 @@ namespace CodexPortableManager
                 unlockModelCatalogEnabled,
                 supplementChineseUiEnabled,
                 englishTechnicalParametersEnabled,
+                false,
+                installPathRevision)
+        {
+        }
+
+        internal OperationSnapshot(
+            string installRoot,
+            bool sandboxCompatibilityEnabled,
+            bool unlockModelCatalogEnabled,
+            bool supplementChineseUiEnabled,
+            bool englishTechnicalParametersEnabled,
+            bool reasoningDisplayEnabled,
+            int installPathRevision)
+            : this(
+                installRoot,
+                sandboxCompatibilityEnabled,
+                unlockModelCatalogEnabled,
+                supplementChineseUiEnabled,
+                englishTechnicalParametersEnabled,
+                reasoningDisplayEnabled,
                 installPathRevision,
+                true,
                 true,
                 true,
                 true)
@@ -36,16 +57,57 @@ namespace CodexPortableManager
             bool manageSandboxCompatibility,
             bool manageModelCatalog,
             bool manageLocalization)
-        {
-            InstallRoot = installRoot;
-            Compatibility = new CompatibilityOptions(
+            : this(
+                installRoot,
                 sandboxCompatibilityEnabled,
                 unlockModelCatalogEnabled,
                 supplementChineseUiEnabled,
                 englishTechnicalParametersEnabled,
+                false,
+                installPathRevision,
                 manageSandboxCompatibility,
                 manageModelCatalog,
-                manageLocalization);
+                manageLocalization,
+                false)
+        {
+        }
+
+        internal OperationSnapshot(
+            string installRoot,
+            bool sandboxCompatibilityEnabled,
+            bool unlockModelCatalogEnabled,
+            bool supplementChineseUiEnabled,
+            bool englishTechnicalParametersEnabled,
+            bool reasoningDisplayEnabled,
+            int installPathRevision,
+            bool manageSandboxCompatibility,
+            bool manageModelCatalog,
+            bool manageLocalization,
+            bool manageReasoningDisplay)
+            : this(
+                installRoot,
+                new CompatibilityOptions(
+                    sandboxCompatibilityEnabled,
+                    unlockModelCatalogEnabled,
+                    supplementChineseUiEnabled,
+                    englishTechnicalParametersEnabled,
+                    reasoningDisplayEnabled,
+                    manageSandboxCompatibility,
+                    manageModelCatalog,
+                    manageLocalization,
+                    manageReasoningDisplay),
+                installPathRevision)
+        {
+        }
+
+        internal OperationSnapshot(
+            string installRoot,
+            CompatibilityOptions compatibility,
+            int installPathRevision)
+        {
+            InstallRoot = installRoot;
+            Compatibility = compatibility ??
+                throw new ArgumentNullException(nameof(compatibility));
             InstallPathRevision = installPathRevision;
         }
 
@@ -101,6 +163,7 @@ namespace CodexPortableManager
         internal bool UnlockModelCatalogEnabled { get; private set; }
         internal bool SupplementChineseUiEnabled { get; private set; }
         internal bool EnglishTechnicalParametersEnabled { get; private set; }
+        internal bool ReasoningDisplayEnabled { get; private set; }
         internal bool CheckEnabled { get; private set; }
         internal bool DownloadEnabled { get; private set; }
         internal bool InstallEnabled { get; private set; }
@@ -140,6 +203,8 @@ namespace CodexPortableManager
                     compatibility != null && compatibility.SupplementChineseUiEnabled.HasValue,
                 EnglishTechnicalParametersEnabled = compatibilitySwitchesEnabled &&
                     compatibility != null && compatibility.EnglishTechnicalParametersEnabled.HasValue,
+                ReasoningDisplayEnabled = compatibilitySwitchesEnabled &&
+                    compatibility != null && compatibility.ReasoningDisplayEnabled.HasValue,
                 CheckEnabled = idle && !input.UninstallBackgroundCleanupActive,
                 DownloadEnabled = idle,
                 InstallEnabled = idle && input.HasInstallRoot && !input.DeploymentCleanupPending,

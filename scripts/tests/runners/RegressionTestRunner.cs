@@ -161,6 +161,8 @@ internal static partial class RegressionTestRunner
             RunCase("模型 catalog 补丁可逆并保持 ASAR 完整性", TestModelCatalogPatchRoundTrip);
             RunCase("模型 catalog 对未知官方指纹安全降级", TestModelCatalogUnknownFingerprintFallback);
             RunCase("模型 catalog 配方拒绝无关路径和缺失上下文", TestModelCatalogRecipeConstraints);
+            RunCase("模型原始推理显示补丁跨 chunk 可逆", TestReasoningDisplayPatchRoundTrip);
+            RunCase("模型推理显示补丁拒绝重复、混合和未知结构", TestReasoningDisplayRecipeConstraints);
             RunCase("模型补丁由统一计划写入并可逆", TestCombinedAsarCompatibilityPlan);
             RunCase("目标结构漂移时统一计划保留可支持功能", TestCompatibilityPlanKeepsSupportedFeatureWhenPeerDrifts);
             RunCase("兼容结果保留配方、状态与回滚后的实际值", TestCompatibilityFeatureResultsRemainDetailed);
@@ -250,6 +252,7 @@ internal static partial class RegressionTestRunner
             RunCase("兼容维护无备份身份时保留待诊断现场", TestCompatibilityRecoveryRequiresBackupIdentity);
             RunCase("兼容维护拒绝安装树内部 junction 越界", TestCompatibilityJournalRejectsNestedJunction);
             RunCase("兼容维护 journal 拒绝缺失或被强制转换的关键字段", TestCompatibilityJournalRejectsMissingOrCoercedFields);
+            RunCase("兼容维护可严格恢复升级前的七字段 journal", TestLegacyCompatibilityJournalRecovery);
             RunCase("兼容维护只更新实际修改制品的 provenance", TestCompatibilityProvenanceUpdatesOnlyChangedArtifacts);
             RunCase("EXE 图标补丁失败时正式文件保持不变且临时文件清理", TestIconPatchIsTransactional);
             RunCase("图标资源缺失或补丁失败不阻断部署", TestVisualCompatibilityBestEffort);

@@ -169,6 +169,11 @@ namespace CodexPortableManager
                     englishTechnicalParametersCheckBox.IsChecked =
                         facts.EnglishTechnicalParametersEnabled.GetValueOrDefault();
                 }
+                if (!preserveKnownDraft || !facts.ReasoningDisplayEnabled.HasValue)
+                {
+                    reasoningDisplayCheckBox.IsChecked =
+                        facts.ReasoningDisplayEnabled.GetValueOrDefault();
+                }
             }
             finally
             {
@@ -191,6 +196,7 @@ namespace CodexPortableManager
                 unlockModelCatalogCheckBox.IsChecked = false;
                 supplementChineseUiCheckBox.IsChecked = false;
                 englishTechnicalParametersCheckBox.IsChecked = false;
+                reasoningDisplayCheckBox.IsChecked = false;
             }
             finally
             {
@@ -311,7 +317,8 @@ namespace CodexPortableManager
             {
                 "SandboxCompatibility",
                 "ModelCatalog",
-                "Localization"
+                "Localization",
+                "ReasoningDisplay"
             };
             if (featureIds.Any(id => !current.ContainsKey(id))) return null;
 
@@ -336,7 +343,12 @@ namespace CodexPortableManager
                         "ModelCatalog",
                         StringComparison.OrdinalIgnoreCase)
                         ? options.ManageModelCatalog
-                        : options.ManageLocalization;
+                        : string.Equals(
+                            featureId,
+                            "Localization",
+                            StringComparison.OrdinalIgnoreCase)
+                            ? options.ManageLocalization
+                            : options.ManageReasoningDisplay;
                 if (!managed)
                 {
                     merged.Add(current[featureId]);
@@ -435,12 +447,21 @@ namespace CodexPortableManager
             CompatibilityItemPresentation english = CreateLocalizationPresentation(
                 "Reasoning",
                 englishTechnicalParametersCheckBox.IsChecked == true);
+            CompatibilityItemPresentation reasoningDisplay =
+                CreateSimpleCompatibilityPresentation(
+                    "ReasoningDisplay",
+                    reasoningDisplayCheckBox.IsChecked == true,
+                    "Patched",
+                    "Official",
+                    false);
             SetCompatibilityStatus(sandboxCompatibilityStatusLabel, sandbox);
             SetCompatibilityStatus(modelCatalogStatusLabel, model);
             SetCompatibilityStatus(chineseUiStatusLabel, chinese);
             SetCompatibilityStatus(englishParametersStatusLabel, english);
+            SetCompatibilityStatus(reasoningDisplayStatusLabel, reasoningDisplay);
 
-            CompatibilityItemPresentation[] items = { sandbox, model, chinese, english };
+            CompatibilityItemPresentation[] items =
+                { sandbox, model, reasoningDisplay, chinese, english };
             int pending = items.Count(item => item.Pending);
             int blocked = items.Count(item => item.Blocked);
             int unknown = items.Count(item => item.Unknown);
@@ -555,7 +576,28 @@ namespace CodexPortableManager
                     observed,
                     desired);
                 if (special != null) return special;
-                if (string.Equals(observed.After, enabledValue, StringComparison.OrdinalIgnoreCase)) actual = true;
+                if (string.Equals(
+                    observed.After,
+                    "PatchedRefreshRequired",
+                    StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        featureId,
+                        "ReasoningDisplay",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    actual = true;
+                    if (desired)
+                    {
+                        return new CompatibilityItemPresentation
+                        {
+                            Text = "需要刷新",
+                            BrushKey = "WarningBrush",
+                            Pending = true,
+                            CanApply = true
+                        };
+                    }
+                }
+                else if (string.Equals(observed.After, enabledValue, StringComparison.OrdinalIgnoreCase)) actual = true;
                 else if (IsSimpleCompatibilityDisabledState(observed.After, disabledValue)) actual = false;
                 else return CreateUnknownPresentation("无法读取", false, "DangerBrush");
             }

@@ -66,7 +66,7 @@ MainWindow
 
 兼容复选框在无草稿时表示当前安装文件的现场检测结果，旁边状态标签同样来自 helper 与 `app.asar` 的实际状态。普通 Checked/Unchecked 事件只标记当前会话草稿，不访问持久配置；只有“单独应用到便携版”会按冻结草稿修改现有安装。未应用就退出时草稿自然丢弃，不依赖 Closing 清理。状态解析缺少某项现场结果时返回未知，不得回退 `AppliedFeatures` 或其他记录猜测开启/关闭；provenance 只提供官方基线、完整性校验和审计结果。后台刷新不得覆盖当前会话脏草稿。
 
-`UiStateInput` 冻结控制器状态、当前路径校验结果、current、实体 `.previous` 与缓存低版本可用性、Store 安装状态、后台卸载清理、兼容状态修订和四项现场可判定性；`UiState` 一次性计算全部输入控件、兼容开关与命令按钮的最终可用性。回滚使用 `.previous` 与缓存候选的并集，卸载只把实体 `.previous` 视为回滚备份。窗口 code-behind 只把该状态一对一投影到控件，不在 `IsEnabled` 赋值处追加第二套条件。
+`UiStateInput` 冻结控制器状态、当前路径校验结果、current、实体 `.previous` 与缓存低版本可用性、Store 安装状态、后台卸载清理、兼容状态修订和五项现场可判定性；`UiState` 一次性计算全部输入控件、兼容开关与命令按钮的最终可用性。回滚使用 `.previous` 与缓存候选的并集，卸载只把实体 `.previous` 视为回滚备份。窗口 code-behind 只把该状态一对一投影到控件，不在 `IsEnabled` 赋值处追加第二套条件。
 
 ### PackageResolver
 
@@ -124,7 +124,7 @@ MainWindow
 
 `CompatibilityPlan` 收集模型目录、沙箱账户环境和界面语言的目标状态。源状态探测与目标包能力探测相互独立：旧安装通过本工具唯一标记判断功能是否实际受管，新官方 staging 再按当前代码结构判断是否能应用。全部关闭且没有标记时不解析功能指纹；需要处理时，所有目标变换在同一 ASAR 会话中组合。
 
-`CompatibilityJournal` 与部署 journal 一样先验证原始 JSON 的当前完整字段和精确类型，再反序列化为事务记录。`OriginalExists`、`TargetExists`、`Modified`、七项选项布尔值、`InstallRootIdentity`、`InstallMarkerRequired` 和 `BackupDirectoryIdentity` 缺失或被错误类型替代时必须失败关闭，不能让反序列化默认值取得恢复授权。事务开始时绑定安装根持久 File ID、原安装 ID 和 marker 要求；恢复前先复验安装根身份，当前 marker 可解析时还必须匹配原安装 ID。marker 本身属于受保护制品；只有 `FilesChanged` 已持久化全部目标摘要后，marker 缺失或损坏才允许依靠根身份降级恢复，并且其余每个受保护制品都必须匹配 journal 的原始态或已捕获目标态。较早阶段、已提交阶段或任一陌生摘要均保留 journal、备份和现场并失败关闭；备份身份缺失或清理失败时同样不得清理现场。
+`CompatibilityJournal` 与部署 journal 一样先验证原始 JSON 的当前完整字段和精确类型，再反序列化为事务记录。当前日志带 `SchemaVersion`，严格要求五个 Enabled 与四个 Manage 共九项选项布尔值；升级前无版本号的七字段日志只在精确匹配旧结构时允许进入恢复，不能让新字段的反序列化默认值取得恢复授权。`OriginalExists`、`TargetExists`、`Modified`、`InstallRootIdentity`、`InstallMarkerRequired` 和 `BackupDirectoryIdentity` 缺失或被错误类型替代时同样失败关闭。事务开始时绑定安装根持久 File ID、原安装 ID 和 marker 要求；恢复前先复验安装根身份，当前 marker 可解析时还必须匹配原安装 ID。marker 本身属于受保护制品；只有 `FilesChanged` 已持久化全部目标摘要后，marker 缺失或损坏才允许依靠根身份降级恢复，并且其余每个受保护制品都必须匹配 journal 的原始态或已捕获目标态。较早阶段、已提交阶段或任一陌生摘要均保留 journal、备份和现场并失败关闭；备份身份缺失或清理失败时同样不得清理现场。
 
 兼容设置的进程关闭发生在持有安装根操作锁之后。`CompatibilityMaintenance.PreflightApply` 先验证安装健康门、所有权、安装 ID 和安装根 File ID，再允许 `ProcessesUnderPath` 停止目录内进程；停止后通过预检快照复验目标未变化，随后 `Apply` 继续执行完整校验和事务写入。该双重校验保证任意目录、非 Codex payload 或竞态替换目标不会仅因用户点击兼容操作就先被结束进程。
 
@@ -146,7 +146,7 @@ MainWindow
 
 `ShellIntegration` 继续保持单一具体静态模块，并以 `partial` 文件分别承载门面 API、注册编排、清理事务、状态归属和平台适配；实际注册表/快捷方式写入与三态归属读取分别下沉到无状态具体类 `ShellRegistrationWriter` 和 `ShellOwnershipChecker`，不引入接口或 DI。`NativeFileSystem`、`MsixPackageTrust`、`ProcessesUnderPath`、各兼容模块和锁实现同样保持具体模块。协议、扩展名、ProgID、AppUserModelID 和可执行文件名的 canonical 安全规则集中在 `ShellResourceNameRules`，注册前的清单值规范化仍由 `ShellIntegration` 负责。只有出现真实替换需求时才引入接口。
 
-模型目录、菜单提交、托盘和性能跟踪入口由内嵌 Esprima 建立只读 AST 索引，以成员关系、对象属性、数据流和调用上下文定位原始源码区间；同一源码版本只解析一次，预序索引记录连续子树区间，避免子节点查询重复扫描整个 bundle。模型目录在完整 AST 前先以可解码属性名建立轻量候选索引，原始、Unicode、十六进制、八进制和字符串身份转义都进入同一判断；索引异常或零候选时回退原有全量扫描，不能把索引结果当成兼容白名单。临时 ASAR 已完成全条目 integrity 校验后，只复验原分析确认且唯一被修改的模型条目；事务提交成功时 UI 直接采用该验证结果，事务未提交、旧现场状态缺失或路径修订变化时仍重新读取文件。JavaScript 正则字面量保留词法节点和源码区间，但不转换或编译为 .NET 正则，因此新版 ECMAScript Unicode 属性不会阻断与正则无关的菜单分析。变换只包裹或替换唯一确认的区间，不重新生成 JavaScript bundle；前序编辑改变文本长度后，后续编辑必须重新分析当前文本生成坐标。模型补丁把官方过滤表达式保留在不可达分支中，关闭时直接恢复原文。推理强度从 `composer.mode.local.reasoning.<level>.label` 键族动态发现，少量新增或减少档位不会要求更新固定清单。中文菜单资源和主进程脚本独立提交：匹配部分应用，未匹配部分保留官方状态并返回兼容提示；受管标记损坏、恢复不确定或候选不唯一的部分仍失败关闭。开发期只接受当前配方，不维护旧补丁迁移分支。产品不安装 loader、preload 或 Electron Hook，不执行运行时注入。
+模型目录、推理内容映射、推理卡片布局、菜单提交、托盘和性能跟踪入口由内嵌 Esprima 建立只读 AST 索引，以成员关系、对象属性、局部数据流和调用上下文定位原始源码区间；同一源码版本只解析一次，预序索引记录连续子树区间，避免子节点查询重复扫描整个 bundle。模型目录在完整 AST 前先以可解码属性名建立轻量候选索引，原始、Unicode、十六进制、八进制和字符串身份转义都进入同一判断；索引异常或零候选时回退原有全量扫描，不能把索引结果当成兼容白名单。推理显示以 `reasoning` 分支中 summary 格式化结果到 UI `push` 的数据流定位映射入口，以 `reasoning-markdown`、`maxHeightByState` 和 `disableMaxHeight` 能力定位布局入口，并在同一组件函数内定位绑定 `item` 的 `useState(false)` 展开状态。原始 `content` 有非空块时添加不可见来源标记并按空行拼接，否则完整保留官方 summary 调用作为回退；来源标记只用于让原始推理块默认展开，用户仍能手动折叠，官方摘要保持原行为。映射入口可与布局组件位于不同 chunk，三处编辑必须作为一个功能在同一 ASAR 临时文件中验证，任一候选重复、缺失或受管标记不完整时均失败关闭；已部署的上一版双标记开发配方作为唯一迁移来源，可在同一事务内升级为三标记当前配方。临时 ASAR 已完成全条目 integrity 校验后，只复验原分析确认且唯一被修改的条目；事务提交成功时 UI 直接采用该验证结果，事务未提交、旧现场状态缺失或路径修订变化时仍重新读取文件。JavaScript 正则字面量保留词法节点和源码区间，但不转换或编译为 .NET 正则，因此新版 ECMAScript Unicode 属性不会阻断与正则无关的菜单分析。变换只包裹、插入或替换唯一确认的区间，不重新生成 JavaScript bundle；同一条目的多处编辑按源码区间逆序执行。模型补丁把官方过滤表达式保留在不可达分支中，推理显示把官方 summary 调用和默认折叠表达式保留在条件回退分支中，关闭时均直接恢复原文。推理强度从 `composer.mode.local.reasoning.<level>.label` 键族动态发现，少量新增或减少档位不会要求更新固定清单。中文菜单资源和主进程脚本独立提交：匹配部分应用，未匹配部分保留官方状态并返回兼容提示；受管标记损坏、恢复不确定或候选不唯一的部分仍失败关闭。产品不安装 loader、preload 或 Electron Hook，不执行运行时注入。
 
 EXE 图标、独立 ICO 和窗口 ICO 均先复制到同目录临时文件，完成资源/格式复验后原子替换；正式 EXE 不再传给 `BeginUpdateResource`。沙箱账户环境修正与其他 ASAR 功能共用临时文件验证和原子替换；官方签名 helper 只作为来源派生制品校验，永远不进入兼容写入事务。
 

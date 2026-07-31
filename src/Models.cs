@@ -162,16 +162,19 @@ namespace CodexPortableManager
         public bool ModelCatalogSucceeded { get; set; }
         public bool SandboxSucceeded { get; set; }
         public bool LocalizationSucceeded { get; set; }
+        public bool ReasoningDisplaySucceeded { get; set; }
         public bool TransactionCommitted { get; internal set; }
         public CompatibilityFeatureResult ModelCatalog { get; internal set; }
         public CompatibilityFeatureResult Sandbox { get; internal set; }
         public CompatibilityFeatureResult Localization { get; internal set; }
+        public CompatibilityFeatureResult ReasoningDisplay { get; internal set; }
 
         public IReadOnlyList<CompatibilityFeatureResult> FeatureResults
         {
             get
             {
-                return new[] { ModelCatalog, Sandbox, Localization }
+                return new[]
+                    { ModelCatalog, Sandbox, Localization, ReasoningDisplay }
                     .Where(feature => feature != null)
                     .ToList()
                     .AsReadOnly();
@@ -180,7 +183,13 @@ namespace CodexPortableManager
 
         public bool AllSucceeded
         {
-            get { return ModelCatalogSucceeded && SandboxSucceeded && LocalizationSucceeded; }
+            get
+            {
+                return ModelCatalogSucceeded &&
+                    SandboxSucceeded &&
+                    LocalizationSucceeded &&
+                    ReasoningDisplaySucceeded;
+            }
         }
 
         public bool HasPartialSuccess
@@ -196,6 +205,7 @@ namespace CodexPortableManager
                 if (!ModelCatalogSucceeded) failed.Add("模型目录");
                 if (!SandboxSucceeded) failed.Add("Windows 沙箱兼容");
                 if (!LocalizationSucceeded) failed.Add("界面语言");
+                if (!ReasoningDisplaySucceeded) failed.Add("模型推理显示");
                 return failed.AsReadOnly();
             }
         }
@@ -412,6 +422,23 @@ namespace CodexPortableManager
                 unlockModelCatalogEnabled,
                 supplementChineseUiEnabled,
                 englishTechnicalParametersEnabled,
+                false)
+        {
+        }
+
+        public CompatibilityOptions(
+            bool sandboxCompatibilityEnabled,
+            bool unlockModelCatalogEnabled,
+            bool supplementChineseUiEnabled,
+            bool englishTechnicalParametersEnabled,
+            bool reasoningDisplayEnabled)
+            : this(
+                sandboxCompatibilityEnabled,
+                unlockModelCatalogEnabled,
+                supplementChineseUiEnabled,
+                englishTechnicalParametersEnabled,
+                reasoningDisplayEnabled,
+                true,
                 true,
                 true,
                 true)
@@ -426,23 +453,50 @@ namespace CodexPortableManager
             bool manageSandboxCompatibility,
             bool manageModelCatalog,
             bool manageLocalization)
+            : this(
+                sandboxCompatibilityEnabled,
+                unlockModelCatalogEnabled,
+                supplementChineseUiEnabled,
+                englishTechnicalParametersEnabled,
+                false,
+                manageSandboxCompatibility,
+                manageModelCatalog,
+                manageLocalization,
+                false)
+        {
+        }
+
+        internal CompatibilityOptions(
+            bool sandboxCompatibilityEnabled,
+            bool unlockModelCatalogEnabled,
+            bool supplementChineseUiEnabled,
+            bool englishTechnicalParametersEnabled,
+            bool reasoningDisplayEnabled,
+            bool manageSandboxCompatibility,
+            bool manageModelCatalog,
+            bool manageLocalization,
+            bool manageReasoningDisplay)
         {
             SandboxCompatibilityEnabled = sandboxCompatibilityEnabled;
             UnlockModelCatalogEnabled = unlockModelCatalogEnabled;
             SupplementChineseUiEnabled = supplementChineseUiEnabled;
             EnglishTechnicalParametersEnabled = englishTechnicalParametersEnabled;
+            ReasoningDisplayEnabled = reasoningDisplayEnabled;
             ManageSandboxCompatibility = manageSandboxCompatibility;
             ManageModelCatalog = manageModelCatalog;
             ManageLocalization = manageLocalization;
+            ManageReasoningDisplay = manageReasoningDisplay;
         }
 
         public bool SandboxCompatibilityEnabled { get; private set; }
         public bool UnlockModelCatalogEnabled { get; private set; }
         public bool SupplementChineseUiEnabled { get; private set; }
         public bool EnglishTechnicalParametersEnabled { get; private set; }
+        public bool ReasoningDisplayEnabled { get; private set; }
         internal bool ManageSandboxCompatibility { get; private set; }
         internal bool ManageModelCatalog { get; private set; }
         internal bool ManageLocalization { get; private set; }
+        internal bool ManageReasoningDisplay { get; private set; }
 
         internal bool AnyManaged
         {
@@ -450,7 +504,8 @@ namespace CodexPortableManager
             {
                 return ManageSandboxCompatibility ||
                     ManageModelCatalog ||
-                    ManageLocalization;
+                    ManageLocalization ||
+                    ManageReasoningDisplay;
             }
         }
 
@@ -461,7 +516,8 @@ namespace CodexPortableManager
                 return SandboxCompatibilityEnabled ||
                     UnlockModelCatalogEnabled ||
                     SupplementChineseUiEnabled ||
-                    EnglishTechnicalParametersEnabled;
+                    EnglishTechnicalParametersEnabled ||
+                    ReasoningDisplayEnabled;
             }
         }
     }
@@ -474,19 +530,42 @@ namespace CodexPortableManager
             bool? supplementChineseUiEnabled,
             bool? englishTechnicalParametersEnabled,
             bool localizationNeedsRefresh = false)
+            : this(
+                sandboxCompatibilityEnabled,
+                unlockModelCatalogEnabled,
+                supplementChineseUiEnabled,
+                englishTechnicalParametersEnabled,
+                null,
+                localizationNeedsRefresh,
+                false)
+        {
+        }
+
+        internal CompatibilitySwitchFacts(
+            bool? sandboxCompatibilityEnabled,
+            bool? unlockModelCatalogEnabled,
+            bool? supplementChineseUiEnabled,
+            bool? englishTechnicalParametersEnabled,
+            bool? reasoningDisplayEnabled,
+            bool localizationNeedsRefresh,
+            bool reasoningDisplayNeedsRefresh = false)
         {
             SandboxCompatibilityEnabled = sandboxCompatibilityEnabled;
             UnlockModelCatalogEnabled = unlockModelCatalogEnabled;
             SupplementChineseUiEnabled = supplementChineseUiEnabled;
             EnglishTechnicalParametersEnabled = englishTechnicalParametersEnabled;
+            ReasoningDisplayEnabled = reasoningDisplayEnabled;
             LocalizationNeedsRefresh = localizationNeedsRefresh;
+            ReasoningDisplayNeedsRefresh = reasoningDisplayNeedsRefresh;
         }
 
         internal bool? SandboxCompatibilityEnabled { get; private set; }
         internal bool? UnlockModelCatalogEnabled { get; private set; }
         internal bool? SupplementChineseUiEnabled { get; private set; }
         internal bool? EnglishTechnicalParametersEnabled { get; private set; }
+        internal bool? ReasoningDisplayEnabled { get; private set; }
         internal bool LocalizationNeedsRefresh { get; private set; }
+        internal bool ReasoningDisplayNeedsRefresh { get; private set; }
 
         internal bool AllKnown
         {
@@ -495,7 +574,8 @@ namespace CodexPortableManager
                 return SandboxCompatibilityEnabled.HasValue &&
                     UnlockModelCatalogEnabled.HasValue &&
                     SupplementChineseUiEnabled.HasValue &&
-                    EnglishTechnicalParametersEnabled.HasValue;
+                    EnglishTechnicalParametersEnabled.HasValue &&
+                    ReasoningDisplayEnabled.HasValue;
             }
         }
     }

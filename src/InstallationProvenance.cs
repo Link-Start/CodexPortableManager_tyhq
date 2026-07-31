@@ -352,6 +352,10 @@ namespace CodexPortableManager
             if (options.ManageModelCatalog) features.Add("ModelCatalog");
             if (options.ManageLocalization) features.Add("Localization");
             if (options.ManageSandboxCompatibility) features.Add("SandboxCompatibility");
+            if (options.ManageReasoningDisplay)
+            {
+                features.Add(ReasoningDisplayCompatibility.FeatureId);
+            }
             return features;
         }
 
@@ -363,6 +367,7 @@ namespace CodexPortableManager
             if (options.ManageModelCatalog) features.Add("模型目录");
             if (options.ManageLocalization) features.Add("界面语言");
             if (options.ManageSandboxCompatibility) features.Add("Windows 沙箱兼容");
+            if (options.ManageReasoningDisplay) features.Add("模型推理显示");
             return features;
         }
 
@@ -381,6 +386,10 @@ namespace CodexPortableManager
                 features.Add("Localization");
             }
             if (HasSuccessfulAfterState(result.Sandbox, "Enabled")) features.Add("SandboxCompatibility");
+            if (HasSuccessfulAfterState(result.ReasoningDisplay, "Patched"))
+            {
+                features.Add(ReasoningDisplayCompatibility.FeatureId);
+            }
         }
 
         private static bool HasSuccessfulAfterState(CompatibilityFeatureResult feature, string expected)
